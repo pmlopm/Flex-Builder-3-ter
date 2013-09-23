@@ -3,39 +3,44 @@
 	creationComplete="initializeApp()">
      <mx:Script>
      	<![CDATA[
-     		import mx.events.DragEvent;
-     		import mx.events.DataGridEvent;
-     		import mx.collections.ArrayCollection;
-     		import mx.formatters.Formatter;
-     		import myComponents.*;
-        	import mx.containers.GridRow;
-        	import mx.messaging.SubscriptionInfo;
-        	import mx.containers.VBox;
-        	import flash.trace.Trace;
-        	import mx.collections.SortField;
-        	import mx.collections.Sort;
-        	import mx.rpc.AsyncToken;
-        	import mx.utils.ObjectProxy;
-        	import mx.utils.Base64Encoder;
-        	import mx.rpc.events.FaultEvent;
-        	import mx.rpc.events.ResultEvent;
-        	import mx.events.ItemClickEvent;
-        	import mx.events.CloseEvent;
-        	import mx.events.TreeEvent;
-        	import mx.collections.XMLListCollection;
-        	import flash.sampler.getInvocationCount;
-        	import mx.events.FlexEvent;
-        	import mx.controls.Alert;
-        	import mx.events.NumericStepperEvent;
-        	import mx.events.ListEvent;
-	 	    import mx.managers.PopUpManager;
-	 	    import myComponents.Task;
 			import com.as3xls.cdf.CDFReader;
 			import com.as3xls.xls.ExcelFile;
 			import com.as3xls.xls.Sheet;
-			import flash.events.KeyboardEvent;
-			import XMLConfig;
 			import com.moralyx.xml.FleXMLer;
+			
+			import flash.events.KeyboardEvent;
+			import flash.sampler.getInvocationCount;
+			import flash.trace.Trace;
+			
+			import mx.collections.ArrayCollection;
+			import mx.collections.IList;
+			import mx.collections.ListCollectionView;
+			import mx.collections.Sort;
+			import mx.collections.SortField;
+			import mx.collections.XMLListCollection;
+			import mx.containers.GridRow;
+			import mx.containers.VBox;
+			import mx.controls.Alert;
+			import mx.controls.List;
+			import mx.events.CloseEvent;
+			import mx.events.DataGridEvent;
+			import mx.events.DragEvent;
+			import mx.events.FlexEvent;
+			import mx.events.ItemClickEvent;
+			import mx.events.ListEvent;
+			import mx.events.NumericStepperEvent;
+			import mx.events.TreeEvent;
+			import mx.formatters.Formatter;
+			import mx.managers.PopUpManager;
+			import mx.messaging.SubscriptionInfo;
+			import mx.rpc.AsyncToken;
+			import mx.rpc.events.FaultEvent;
+			import mx.rpc.events.ResultEvent;
+			import mx.utils.Base64Encoder;
+			import mx.utils.ObjectProxy;
+			
+			import myComponents.*;
+			import myComponents.Task;
         
      	include "myComponents/myASFile.as";
      	include "myComponents/ViewWeek.as";
@@ -2522,7 +2527,27 @@
 
 		private function dragToDoExit(event:DragEvent):void
 		{
-			var i : int = 100;
+			if (event.dragSource.hasFormat("items"))
+			{
+				
+/*
+				event.preventDefault();
+				event.currentTarget.hideDropFeedback(event);
+				//var dropTarget:List = DataGrid(event.currentTarget).dataProvider;
+				
+				var itemsArray:Array = event.dragSource.dataForFormat("items") as Array;
+				
+				var tempItem:Object= {label: itemsArray[0].label, data:itemsArray[0].data};
+				
+				var dropLoc:int = ((DataGrid(event.currentTarget).dataProvider) as List).calculateDropIndex(event);
+				
+				IList(List(DataGrid(event.currentTarget).dataProvider)).addItemAt(tempItem, dropLoc);
+*/
+				var index :int = event.target.selectedIndex;
+				
+				var xmlItem : XML = XML(event.target.dataProvider[index]);
+				
+			}
 		}
 
 		private function buildToolTip(item:Object):String{
@@ -2680,7 +2705,7 @@
 	      </mx:Canvas>
 	      <mx:Canvas label="ToDo" width="100%" height="100%">
 			  <mx:VBox width="100%" height="100%">
-				  <mx:DataGrid id="ToDoGrid" width="100%" height="95%" dragEnabled="true" dropEnabled="true" dragMoveEnabled="true" dataProvider="{youTrackToDoList.list}" dragExit="dragToDoExit(event)" dataTipFunction="buildToolTip">
+				  <mx:DataGrid id="ToDoGrid" width="100%" height="95%" dragEnabled="true" dropEnabled="true" dragMoveEnabled="true" dataProvider="{youTrackToDoList.list}" dragDrop="dragToDoExit(event)" dataTipFunction="buildToolTip">
 					  <mx:columns>
 						  <mx:DataGridColumn headerText="id" dataField="@id" width="{Math.round(this.ToDoGrid.width * 0.33)}"/>
 						  <mx:DataGridColumn headerText="description" dataField="field.value" labelFunction="getTicketName" showDataTips="true"/>

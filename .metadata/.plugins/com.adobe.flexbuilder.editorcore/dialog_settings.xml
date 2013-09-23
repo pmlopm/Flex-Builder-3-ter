@@ -4,8 +4,8 @@
 		<item value="true" key="Size and Position"/>
 		<item value="true" key="Layout"/>
 		<item value="true" key="Style"/>
-		<item value="1" key="ViewOption"/>
 		<item value="true" key="Common"/>
+		<item value="1" key="ViewOption"/>
 	</section>
 	<section name="ExportWizard">
 	</section>
