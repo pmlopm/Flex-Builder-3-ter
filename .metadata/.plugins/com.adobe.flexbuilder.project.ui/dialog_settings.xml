@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<section name="Workbench">
+	<section name="ExportSigningOptions">
+		<list key="certificates">
+			<item value="/Users/jll/Documents/Flex Builder 3 ter/jll.home.certificate"/>
+			<item value=""/>
+		</list>
+	</section>
+</section>

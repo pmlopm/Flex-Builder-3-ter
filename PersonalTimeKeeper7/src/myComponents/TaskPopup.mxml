@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:TitleWindow xmlns:mx="http://www.adobe.com/2006/mxml"
+ layout="absolute" width="348" height="218"
+ title="Add A Task">
+  <mx:Metadata>
+    [Event(name="SaveTask")]
+  </mx:Metadata>
+  <mx:Script>
+   <![CDATA[
+     import mx.managers.PopUpManager;
+     
+     private function close():void
+     {
+       PopUpManager.removePopUp(this);
+     }
+     
+     private function save():void
+     {
+       this.dispatchEvent(new Event("SaveTask"));
+     }
+   ]]>
+ </mx:Script>
+  <mx:Label text="Title" x="35" y="10"/>
+  
+  <mx:TextInput id="title1" width="150" x="84" y="8"/>
+  <mx:Label text="Description"  y="62" x="10"/>
+  <mx:TextArea id="description" width="234" height="77" x="84" y="61"/>
+  <mx:Button label="Cancel" click="close();" x="193" y="146"/>
+  <mx:Button label="Save" click="save();" x="264" y="146"/>
+</mx:TitleWindow>

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<list>
+<perf start="2010/02/01 21:49:07" description="" end="2010/02/01 21:49:15" task="--Undefined--" duration="0.13333333333333333"/>
+<perf start="2010/02/01 21:48:13" description="" end="2010/02/01 21:48:31" task="subNode" duration="0.3"/>
+<perf start="2010/02/01 21:48:09" description="" end="2010/02/01 21:48:13" task="subNode" duration="0.06666666666666667"/>
+<perf start="2010/02/01 21:47:53" description="" end="2010/02/01 21:48:09" task="--Undefined--" duration="0.26666666666666666"/>
+<perf start="2010/02/01 21:46:04" description="" end="2010/02/01 21:46:13" task="--Undefined--" duration="0.15"/>
+<perf start="2010/02/01 21:41:09" description="" end="2010/02/01 21:41:15" task="--Undefined--" duration="0.1"/>
+<perf start="2010/02/01 21:38:43" description="" end="2010/02/01 21:41:05" task="--Undefined--" duration="2.3666666666666667"/>
+<perf start="2010/02/01 21:34:08" description="" end="2010/02/01 21:38:33" task="--Undefined--" duration="4.416666666666667"/>
+<perf start="2010/02/01 21:33:42" description="" end="2010/02/01 21:33:49" task="--Undefined--" duration="0.11666666666666667"/>
+<perf start="2010/02/01 21:33:24" description="" end="2010/02/01 21:33:28" task="--Undefined--" duration="0.06666666666666667"/>
+<perf start="2010/02/01 21:33:03" description="" end="2010/02/01 21:33:11" task="--Undefined--" duration="0.13333333333333333"/>
+<perf start="2010/02/01 21:32:07" description="" end="2010/02/01 21:32:12" task="--Undefined--" duration="0.08333333333333333"/>
+<perf start="2010/02/01 21:31:10" description="" end="2010/02/01 21:31:14" task="--Undefined--" duration="0.06666666666666667"/>
+<perf start="2010/02/01 21:28:31" description="" end="2010/02/01 21:28:35" task="--Undefined--" duration="0.06666666666666667"/>
+<perf start="2010/02/01 21:27:32" description="" end="2010/02/01 21:27:50" task="--Undefined--" duration="0.3"/>
+<perf start="2010/02/01 21:26:31" description="" end="2010/02/01 21:26:45" task="--Undefined--" duration="0.23333333333333334"/>
+</list>

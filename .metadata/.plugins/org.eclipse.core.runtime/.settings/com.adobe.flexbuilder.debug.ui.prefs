@@ -1,0 +1,5 @@
+#Thu Sep 19 22:05:33 CEST 2013
+com.adobe.flexbuilder.debug.ui.variableFiltering.displayHex=false
+eclipse.preferences.version=1
+com.adobe.flexbuilder.debug.ui.groupInheritedMembers=false
+com.adobe.flexbuilder.debug.ui.variableFiltering.showQualifiedNames=false

@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+
+SiteMapExample by Jamie McDaniel. December 8, 2008
+Visit www.curiousfind.com/blog for more information.
+
+This example adds functionality to the Flex tree component:
+    
+1. Nodes can be sorted alphabetically
+2. Tree maintains its open state when its dataprovider is updated from the server
+
+    
+Copyright (c) 2008 Jamie McDaniel
+ 
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation
+files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+-->
+<mx:Canvas xmlns:mx="http://www.adobe.com/2006/mxml" width="100%" height="100%">
+    <mx:Script>
+        <![CDATA[
+            import mx.collections.ArrayCollection;
+            import mx.collections.Sort;
+            import mx.collections.SortField;
+            
+            private var _dataProvider:ArrayCollection;
+            private var _openItems:Array;
+            private var _verticalScrollPosition:Number;
+            
+            public var siteMapIDField:String;
+            [Bindable]
+            public var siteMapLabelField:String;
+            public var sortItems:Boolean = false;
+            public var rememberOpenState:Boolean = false;
+            
+            public function get dataProvider():ArrayCollection
+            {
+                return _dataProvider;
+            }
+           
+            public function set dataProvider(value:ArrayCollection):void
+            {
+                if (_dataProvider != null)
+                {
+                    saveTreeOpenState();
+                }
+                _dataProvider = value;
+                if (sortItems == true)
+                {
+                    // Sort the Array Collection                
+                    var sortField:SortField = new SortField(siteMapLabelField, true);
+                    var treeSort:Sort = new Sort();
+                    treeSort.fields = [sortField];
+                    _dataProvider.sort = treeSort;
+                    // Sort the nested arrays of the ArrayCollection using recursion
+                    for (var i:int = 0; i < _dataProvider.length; i++)
+                    {
+                        sortTree(_dataProvider.getItemAt(i));
+                    }
+                    _dataProvider.refresh();
+                }
+                myTree.dataProvider = _dataProvider;
+                myTree.validateNow();
+                if (rememberOpenState == true)
+                {
+                    for (var t:int = 0; t < _dataProvider.length; t++)
+                    {
+                        if (_dataProvider.getItemAt(t).hasOwnProperty("children"))
+                        {
+                            openTreeItems(_dataProvider.getItemAt(t));
+                        }
+                    }
+                    myTree.verticalScrollPosition = _verticalScrollPosition;
+                }
+            }
+
+            private function sortTree(object:Object):void
+            {
+                if (object.hasOwnProperty("children"))
+                {
+                    object.children.sortOn(siteMapLabelField, Array.CASEINSENSITIVE);
+                    for (var t:int = 0; t < object.children.length; t++)
+                    {
+                        sortTree(object.children[t]);
+                    }    
+                }
+            }
+                        
+            private function openTreeItems(object:Object):void
+            {
+                for (var i:int = 0; i < _openItems.length; i++)
+                {
+                    if (object[siteMapIDField] == _openItems[i])
+                    {
+                        myTree.expandItem(object, true);
+                        break;
+                    }
+                }
+                if (object.hasOwnProperty("children"))
+                {
+                    for (var t:int = 0; t < object.children.length; t++)
+                    {
+                        openTreeItems(object.children[t]);
+                    }    
+                }
+            }
+                                    
+            private function saveTreeOpenState():void
+            {
+                _verticalScrollPosition = myTree.verticalScrollPosition;
+                _openItems = [];
+                for (var i:int = 0; i < myTree.openItems.length; i++)
+                {
+                    if (myTree.openItems[i].hasOwnProperty(siteMapIDField))
+                    {
+                        _openItems[i] = myTree.openItems[i][siteMapIDField];
+                    }
+                }                
+            }
+        ]]>
+    </mx:Script>
+    <mx:Tree width="100%" height="100%" id="myTree" borderThickness="0" labelField="{siteMapLabelField}"/>    
+</mx:Canvas>

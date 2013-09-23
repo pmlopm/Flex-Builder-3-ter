@@ -1,0 +1,60 @@
+<?xml version="1.0"?>
+<!-- containers\layouts\myComponents\MyLoginForm.mxml -->
+<mx:TitleWindow xmlns:mx="http://www.adobe.com/2006/mxml" width="600" height="300">
+    
+	<mx:Metadata>
+    	[Event(name="MergeInPrevious")]
+    	[Event(name="MergeInNext")]
+    	[Event(name="DoNotMerge")]
+  	</mx:Metadata>
+    <mx:Script>
+        <![CDATA[
+            import mx.managers.PopUpManager;
+            
+            private function mergeInPrevious():void {
+				//idle time included in previous task => merge idle time into previous, start new task
+				var event:Event = new Event("MergeInPrevious");
+      			this.dispatchEvent(event);
+      			PopUpManager.removePopUp(this);	
+				            	
+            }
+            
+            private function mergeInNext():void {
+            	//idle time is a new task => leave as-is 
+				var event:Event = new Event("MergeInNext");
+      			this.dispatchEvent(event);					            	
+       			PopUpManager.removePopUp(this);	
+           }
+            
+            private function doNotMerge():void {
+				//idle time is not billable => start new task
+				var event:Event = new Event("DoNotMerge");
+      			this.dispatchEvent(event);	
+       			PopUpManager.removePopUp(this);	
+           }
+
+        ]]>
+    </mx:Script>
+
+    <!-- mx:Form>
+        <mx:FormItem label="User Name">
+            <mx:TextInput id="username" width="100%"/>
+        </mx:FormItem> 
+        <mx:FormItem label="Password">
+            <mx:TextInput id="password" 
+                displayAsPassword="true" 
+                width="100%"/>
+        </mx:FormItem> 
+    </mx:Form-->
+    <mx:VBox>
+        <mx:Button 
+            label="Continued previous task"
+            click="mergeInPrevious();"/> 
+        <mx:Button 
+            label="Performed a new task"
+            click="mergeInNext();"/> 
+        <mx:Button 
+            label="Made a pause"
+            click="doNotMerge();"/> 
+    </mx:VBox> 
+</mx:TitleWindow>

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Rename resource &apos;PersonalTimeKeeper6&apos; to &apos;PersonalTimeKeeper7&apos;" description="Rename resource &apos;PersonalTimeKeeper6&apos;" flags="7" id="org.eclipse.ltk.core.refactoring.rename.resource" input="/PersonalTimeKeeper6" name="PersonalTimeKeeper7" stamp="1379616331364" updateReferences="true"/>
+</session>
