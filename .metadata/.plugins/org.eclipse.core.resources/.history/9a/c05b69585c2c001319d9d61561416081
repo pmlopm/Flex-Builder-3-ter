@@ -2112,7 +2112,7 @@
 		}
 		
 		private function youTrackLoginResultHandler(event:ResultEvent):void {
-/*			if (perfTemp != null) {
+			if (perfTemp != null) {
 				var params : Object = new Object();
 				if (Number(perfTemp.@duration)>0) {
 					errorMsg1 += "\nYouTrack Uploader Login successful, starting upload";
@@ -2125,10 +2125,9 @@
 					myToken.perf = perfTemp;
 				}
 			} else {
-*/
-			errorMsg1 += "\nYouTrack Uploader Login successful, nothing to upload";
+				errorMsg1 += "\nYouTrack Uploader Login successful, nothing to upload";
 				//errorMsg2.text += "\nYouTrack Uploader Login successful, nothing to upload";			
-//			}
+			}
 		}
 		
 		private function youTrackLoginFaultHandler(event:FaultEvent):void {
