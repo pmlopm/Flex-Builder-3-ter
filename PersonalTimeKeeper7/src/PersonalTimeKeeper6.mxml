@@ -89,25 +89,17 @@
         
         [Bindable]
         private var config : SharedObject;
+			
+		[Bindable]
+		private var log : String;
         
         // Additional import statement to use the TitleWindow container.
         import mx.containers.TitleWindow;
         
   		private function initializeApp():void {
 			config = SharedObject.getLocal("PersonalTimeKeeper5Config");
-			//config.data.ytURL = "http://10.0.2.80";
-			youTrackLogin.rootURL = config.data.ytURL;
-			youTrackLogin.url = config.data.ytURL;
-			youTrackUploader.rootURL = config.data.ytURL;
-			youTrackUploader.url = config.data.ytURL;
-			
-			youTrackProjects.url = config.data.ytURL;
-
-			inflowUploader.url = config.data.inURL;
-			var oEncoder:Base64Encoder = new Base64Encoder(); 
-			oEncoder.insertNewLines = false; 
-			oEncoder.encode(config.data.inLogin + ":" + config.data.inPassword); 
-			inflowUploader.headers = {Authorization:"Basic " + oEncoder.toString()}; 
+			initializeYT(config);
+			initializeIn(config);
 						
  			init();
 
@@ -153,8 +145,8 @@
 			
 		}
 			
-       private function init():void
-        {
+		private function init():void
+		{
         	prepareClockTimer();
         	prepareInactivityDetection();
         	loadRecentTaskList();
@@ -171,11 +163,39 @@
 			tabnavigator1.selectedIndex=1;	
 			systemManager.stage.addEventListener(KeyboardEvent.KEY_DOWN,captureSpecialKeys);	
 			systemManager.stage.addEventListener(KeyboardEvent.KEY_UP,captureSpecialKeys);
-			loadYTProjectList();	
-      }
+			loadYTProjectList();
+			
+			if (!config.data.hasOwnProperty("ytFilter"))
+			{
+				config.data.ytFilter = "assignee:me+state:unresolved";
+				config.flush();
+			}
+      	}
+			
+		private function initializeYT(config:SharedObject):void
+		{
+			log += "\nInitialize YouTrack connectors";
+			youTrackLogin.rootURL = config.data.ytURL;
+			youTrackLogin.url = config.data.ytURL;
+			
+			youTrackUploader.rootURL = config.data.ytURL;
+			youTrackUploader.url = config.data.ytURL;		
+			youTrackProjects.url = config.data.ytURL;
+		}
+			
+		private function initializeIn(config:SharedObject):void
+		{
+			log += "\nInitialize Inflow connector";
+			inflowUploader.url = config.data.inURL;
+			var oEncoder:Base64Encoder = new Base64Encoder(); 
+			oEncoder.insertNewLines = false; 
+			oEncoder.encode(config.data.inLogin + ":" + config.data.inPassword); 
+			inflowUploader.headers = {Authorization:"Basic " + oEncoder.toString()};				
+		}
         
         private function loadYTProjectList():void
         {
+			log += "\nLoad YouTrack project list";
 			var login :Object = new Object();
 			//youTrackProjects.concurrency="single";
 			youTrackLogin.url = config.data.ytURL + "/rest/user/login";
@@ -189,8 +209,9 @@
         }
         
 		private function youTrackLoginResultHandler1(event:ResultEvent):void {
-			errorMsg1 += "\nYouTrack Project Login successful, starting upload";
-			errorMsg2.text += "\nYouTrack Project Login successful, starting upload";
+			errorMsg1 += "\nYouTrack Login successful, starting project list download";
+			log += "\nYouTrack Login successful, starting project list download";
+					
 			youTrackProjects.url = config.data.ytURL + '/rest/project/all';
 			youTrackProjects.addEventListener(ResultEvent.RESULT, youTrackProjectsResultHandler);
 			youTrackProjects.addEventListener(FaultEvent.FAULT,youTrackProjectsFaultHandler);
@@ -199,17 +220,20 @@
 		
 		private function youTrackLoginFaultHandler1(event:FaultEvent):void {
 			if (event.statusCode != 401) {
-				errorMsg2.text += "\nYouTrack Project Login error " + event.statusCode;
+				log += "\nYouTrack Login error " + event.statusCode;
 			}
-			errorMsg1 += "\nYouTrack Uploader Login error";
+			errorMsg1 += "\nYouTrack Login error";
 			errorMsg1 = event.message.toString();
 		}
 		
 		private function youTrackProjectsResultHandler(event:ResultEvent):void {
 			youTrackProjectList = new XMLListCollection(new XMLList((event.result as XML).project));
-			errorMsg1 += "\nYouTrack Project Login successful";
+			errorMsg1 += "\nYouTrack Project list upload successful";
+			log += "\nYouTrack Project list upload successful";
 			
-			youTrackToDo.url = config.data.ytURL + '/rest/issue?filter=assignee:me+state:unresolved';
+			errorMsg1 += "\nYouTrack Project ToDo list download starting";
+			log += "\nYouTrack Project ToDo list download starting";
+			youTrackToDo.url = config.data.ytURL + '/rest/issue?filter=' + YTFilter.text;// assignee:me+state:unresolved';
 			youTrackToDo.addEventListener(ResultEvent.RESULT, youTrackToDoResultHandler);
 			youTrackToDo.addEventListener(FaultEvent.FAULT,youTrackToDoFaultHandler);
 			var myToken:AsyncToken = youTrackToDo.send(null); 
@@ -217,9 +241,9 @@
 		
 		private function youTrackProjectsFaultHandler(event:FaultEvent):void {
 			if (event.statusCode != 401) {
-				errorMsg2.text += "\nYouTrack Project2 Login error " + event.statusCode;
+				log += "\nYouTrack Project list upload failed, error: " + event.statusCode;
 			}
-			errorMsg1 += "\nYouTrack Proejct2 Login error";
+			errorMsg1 += "\nYouTrack Proejct list upload failed, error:";
 			errorMsg1 = event.message.toString();
 		}
 
@@ -227,31 +251,31 @@
          {
 	        var node:XML = (e.currentTarget as Tree).selectedItem as XML;
 			errorMsg1 += "\nYouTrack Project";
-			errorMsg2.text += "\nYouTrack Project";
-			youTrackProjectIssues.url = config.data.ytURL + '/rest/issue?max=9999&filter=state:Unresolved project:' + node.@shortName;
-			youTrackProjectIssues.addEventListener(ResultEvent.RESULT, youTrackProjectTicketsResultHandler);
-			youTrackProjectIssues.addEventListener(FaultEvent.FAULT,youTrackProjectTicketsFaultHandler);
-			var myToken2:AsyncToken = youTrackProjectIssues.send(null);
+			log += "\nYouTrack Project";
+//			youTrackProjectIssues.url = config.data.ytURL + '/rest/issue?max=9999&filter=project:' + node.@shortName + "+" +config.data.ytFilter;
+//			youTrackProjectIssues.addEventListener(ResultEvent.RESULT, youTrackProjectTicketsResultHandler);
+//			youTrackProjectIssues.addEventListener(FaultEvent.FAULT,youTrackProjectTicketsFaultHandler);
+//			var myToken2:AsyncToken = youTrackProjectIssues.send(null);
+			YTProjectSelected(node.@shortName);
          }
          
 		private function youTrackProjectTicketsResultHandler(event:ResultEvent):void {
 			youTrackProjectTicketList = new XMLListCollection(new XMLList((event.result as XML).issue));
 			var arr:Array = youTrackProjectIssues.url.split(':',3);
-	        saveXMLToFile(youTrackProjectTicketList,"PersonalTimeKeeper5/YT_" + arr[2].toString() + ".xml");
+			var node:XML = inflowPrefTreeView.selectedItem as XML
+	        //saveXMLToFile(youTrackProjectTicketList,"PersonalTimeKeeper5/YT_" + node.@name + ".xml");
 			errorMsg1 += "\nYouTrack ProjectTickets";
 			errorMsg1 = event.result.toString();
 		}
 		
 		private function youTrackProjectTicketsFaultHandler(event:FaultEvent):void {
 			if (event.statusCode != 401) {
-				errorMsg2.text += "\nYouTrack ProjectTickets Login error " + event.statusCode;
+				log += "\nYouTrack Project Tickets loading failed, error: " + event.statusCode;
 			}
-			errorMsg1 += "\nYouTrack Proejct2 Login error";
+			errorMsg1 += "\nYouTrack Project Tickets loading error";
 			errorMsg1 = event.message.toString();
 		}
-        
-        
-        
+              
         private function youTrackToDoResultHandler(event:ResultEvent):void {
         	youTrackToDoList = new XMLListCollection(new XMLList((event.result as XML).issue));	
         }
@@ -259,7 +283,7 @@
         private function youTrackToDoFaultHandler(event:FaultEvent):void {
 			errorMsg1 += "\nYouTrack ToDo loading error";
 			errorMsg1 = event.message.toString();
-        	
+        	log += "\nYouTrack ToDo loading error " + event.message.toString();
         }
         
 		private function readXL(filePath:String):ExcelFile {
@@ -1944,6 +1968,7 @@
 			
 			private function resetTask():void {
 				if (grid.selectedItem != null) {
+					grid.selectedItem.@ytCode = "";
 					grid.selectedItem.@task = UNDEFINED;
 					grid.selectedItem.@state = stateUndefined;
 					grid.selectedItem.@appId = "";
@@ -1951,6 +1976,7 @@
 					grid.selectedItem.@type = "";
 					grid.selectedItem.@typeId= "";
 					grid.selectedItem.@path="";
+					grid.selectedItem.@description = "";
 					updateDayTotal();
 				}
 			}
@@ -2023,13 +2049,13 @@
 			}
 			//inflowTreeView.openItems = openTreeList;
 			saveXMLToFile(inflowTreeData, "PersonalTimeKeeper5/InflowTree.xml");
-			errorMsg2.text += "\nInflow Tree Load Successful";	
+			log += "\nInflow Tree Load Successful";	
 		}
 
 		private function inflowTreeLoaderFaultHandler(event:FaultEvent):void {
 			trace(event.statusCode);
 			if (event.statusCode != 401) {
-				errorMsg2.text += "\nInflow Tree Load error " + event.statusCode;
+				log += "\nInflow Tree Load error " + event.statusCode;
 				event.preventDefault();
 				inflowTreeData = loadLocalFile("PersonalTimeKeeper5/InflowTree.xml");
 			}
@@ -2043,8 +2069,8 @@
 				event.token.perf.@state = stateReported;				
 			}
 			saveData();
-			errorMsg2.text += "\nInflow upload successful";
-			errorMsg2.text += "\nInflow Reported task:" + event.token.perf.@task + " desc:" + event.token.perf.@description + " start:" + event.token.perf.@start + " app:" + event.token.perf.@appId + " type:" + event.token.perf.@typeId;
+			log += "\nInflow upload successful";
+			log += "\nInflow Reported task:" + event.token.perf.@task + " desc:" + event.token.perf.@description + " start:" + event.token.perf.@start + " app:" + event.token.perf.@appId + " type:" + event.token.perf.@typeId;
 			errorMsg1 += "\nInflow upload successful";
 			errorMsg1 += "\nInflow Reported task:" + event.token.perf.@task + " desc:" + event.token.perf.@description + " start:" + event.token.perf.@start + " app:" + event.token.perf.@appId + " type:" + event.token.perf.@typeId;
 		}
@@ -2052,7 +2078,7 @@
 		private function inflowUploaderFaultHandler(event:FaultEvent):void {
 			//if (event.statusCode != 401) {
 				//Alert.show("Inflow Uploader REST error");
-				errorMsg2.text += "\nInflow Uploader REST error " + event.statusCode;
+				log += "\nInflow Uploader REST error " + event.statusCode;
 			//}	
 			errorMsg1 += "\nInflow Uploader REST error " + event.statusCode;
 			errorMsg1 += event.message.toString();
@@ -2071,13 +2097,13 @@
 			saveData();
 			errorMsg1 += "\nYouTrack upload successful";
 			errorMsg1 += "\nYouTrack Reported task:" + event.token.perf.@task + " desc:" + event.token.perf.@description + " start:" + event.token.perf.@start + " app:" + event.token.perf.@appId + " type:" + event.token.perf.@typeId;
-			errorMsg2.text += "\nYouTrack upload successful";
-			errorMsg2.text += "\nYouTrack Reported task:" + event.token.perf.@task + " desc:" + event.token.perf.@description + " start:" + event.token.perf.@start + " app:" + event.token.perf.@appId + " type:" + event.token.perf.@typeId;
+			log += "\nYouTrack upload successful";
+			log += "\nYouTrack Reported task:" + event.token.perf.@task + " desc:" + event.token.perf.@description + " start:" + event.token.perf.@start + " app:" + event.token.perf.@appId + " type:" + event.token.perf.@typeId;
 		}
 
 		private function youTrackUploaderFaultHandler(event:FaultEvent):void {
 //			if (event.statusCode != 401) {
-				errorMsg2.text += "\nYouTrack Uploader REST error " + event.statusCode;
+				//errorMsg2.text += "\nYouTrack Uploader REST error " + event.statusCode;
 //			}	
 			errorMsg1 += "\nYouTrack Uploader REST error " + event.statusCode;
 			errorMsg1 += event.message.toString();
@@ -2090,7 +2116,7 @@
 				var params : Object = new Object();
 				if (Number(perfTemp.@duration)>0) {
 					errorMsg1 += "\nYouTrack Uploader Login successful, starting upload";
-					errorMsg2.text += "\nYouTrack Uploader Login successful, starting upload";
+					//errorMsg2.text += "\nYouTrack Uploader Login successful, starting upload";
 					var date:String = perfTemp.@start;
 					date = date.substr(0,10).replace(/\//g,'-');
 					params.command = 'add work ' + date + ' ' + roundDuration(Number(perfTemp.@duration),15) + 'm ' + perfTemp.@name;
@@ -2100,13 +2126,13 @@
 				}
 			} else {
 				errorMsg1 += "\nYouTrack Uploader Login successful, nothing to upload";
-				errorMsg2.text += "\nYouTrack Uploader Login successful, nothing to upload";			
+				//errorMsg2.text += "\nYouTrack Uploader Login successful, nothing to upload";			
 			}
 		}
 		
 		private function youTrackLoginFaultHandler(event:FaultEvent):void {
 			if (event.statusCode != 401) {
-				errorMsg2.text += "\nYouTrack Uploader Login error " + event.statusCode;
+				//errorMsg2.text += "\nYouTrack Uploader Login error " + event.statusCode;
 			}
 			errorMsg1 += "\nYouTrack Uploader Login error";
 			errorMsg1 = event.message.toString();
@@ -2191,14 +2217,14 @@
 		}
 		
 	    public function uploadClicked(event:MouseEvent):void {
-	    	errorMsg2.text="Uploading one task";
+	    	//errorMsg2.text="Uploading one task";
 	    	//uploadTask2Inflow((XML)(grid.selectedItem));
 	    	//uploadTask2YouTrack((XML)(grid.selectedItem));
 	    	uploadTask((XML)(grid.selectedItem));
 	    }
 	    
 		private function uploadTasks():void {
-			errorMsg2.text = "Uploading all tasks";
+			//errorMsg2.text = "Uploading all tasks";
 			for each (var perf:XML in perfGrid) {
 				uploadTask(perf);
 			}
@@ -2237,7 +2263,7 @@
 		}
 		
 		
-		private function isYTProject(project : String):Boolean{
+		public function isYTProject(project : String):Boolean{
 			var pattern : RegExp = /.*YT/;
 			return pattern.test(project);
 		}
@@ -2250,12 +2276,33 @@
 			if (perf.hasOwnProperty('@ytCode') && perf.@ytCode != '') {
 				if ((!perf.hasOwnProperty('@ytReported') || perf.@ytReported == stateDefined || perf.@ytReported == stateFailed) && Number(perf.@duration) > 0) {
 					var login :Object = new Object();
+/*
 					youTrackLogin.url = config.data.ytURL + "/user/login";
 					login.login = config.data.ytLogin;
 					login.password = config.data.ytPassword;
 					perfTemp = perf;
 					youTrackLogin.send(login);
 					youTrackLogin.url = youTrackLogin.rootURL;
+*/					
+//					if (perfTemp != null) {
+						var params : Object = new Object();
+						if (Number(perf.@duration)>0) {
+							errorMsg1 += "\nYouTrack Uploader Login successful, starting upload";
+							//errorMsg2.text += "\nYouTrack Uploader Login successful, starting upload";
+							var date:String = perf.@start;
+							date = date.substr(0,10).replace(/\//g,'-');
+							params.command = 'add work ' + date + ' ' + roundDuration(Number(perf.@duration),15) + 'm ' + perf.@name;
+							youTrackUploader.url = youTrackUploader.rootURL + '/rest/issue/' + perf.@ytCode + '/execute';
+							var myToken:AsyncToken = youTrackUploader.send(params);
+							myToken.perf = perf;
+						}
+//					} else {
+//						errorMsg1 += "\nYouTrack Uploader Login successful, nothing to upload";
+						//errorMsg2.text += "\nYouTrack Uploader Login successful, nothing to upload";			
+//					}
+
+
+				
 				}
 			}
 		}
@@ -2327,10 +2374,17 @@
          private function loadYTIssues(e:Event):void
          {
 	         var node:XML = e.currentTarget.selectedItem as XML; //inflowTreeView.selectedItem as XML;
-	         var path : String = buildNodePath(node);
-	         YTProjectSelected(path.split('/',1)[0]);
+	         //var path : String = buildNodePath(node);
+	         //YTProjectSelected(path.split('/',1)[0]);
+			 refreshYTIssues(node);
          }
-                  
+         
+		 private function refreshYTIssues(node:XML):void
+		 {
+			 var path : String = buildNodePath(node);
+			 YTProjectSelected(path.split('/',1)[0]);
+		 }
+			
          private function selectInflowNode(e:MouseEvent):void
          {
 	         var node:XML = e.currentTarget.selectedItem as XML; //inflowTreeView.selectedItem as XML;
@@ -2357,11 +2411,11 @@
             	}
 //            }
             }
-            
+
           private function YTProjectSelected(project:String):void
          {
          	
-			youTrackProjectIssues.url = config.data.ytURL + '/rest/issue?max=9999&filter=state:Unresolved project:"' + project + '"';
+			youTrackProjectIssues.url = config.data.ytURL + '/rest/issue?max=9999&filter=project:"' + project + '"+' + config.data.ytFilter;
 			youTrackProjectIssues.addEventListener(ResultEvent.RESULT, youTrackProjectTicketsResultHandler);
 			youTrackProjectIssues.addEventListener(FaultEvent.FAULT,youTrackProjectTicketsFaultHandler);
 			var myToken2:AsyncToken = youTrackProjectIssues.send(null);         	
@@ -2443,10 +2497,16 @@
 
             //import org.igorcosta.hacks.SWF;  
   
-            public function readVersion():void {  
-            //    var d:Date = SWF.readCompilationDate();  
-                //Alert.show(d.toString());  
-            }  
+		public function showAPropos():void {  
+				var appXml:XML = NativeApplication.nativeApplication.applicationDescriptor;
+				var ns:Namespace = appXml.namespace();
+				var appVersion:String = appXml.ns::version[0];
+				
+				var airRuntime:String = NativeApplication.nativeApplication.runtimeVersion;
+				
+				//return appVersion;
+				Alert.show("Version: " + appVersion + "\n" + "AIRRuntime: " + airRuntime + "\n");
+		}
 
 		public function doNotSelectAll(event:Object):void {
 		}
@@ -2470,7 +2530,7 @@
 		
 		private function testYTCredentials(ytURL:String, ytLogin:String, ytPassword:String):void {
 			errorMsg1 = "\nTesting YouTrack credentials";
-			errorMsg2.text= "\nTesting YouTrack credentials";
+			//errorMsg2.text= "\nTesting YouTrack credentials";
 			var login :Object = new Object();
 			youTrackLogin.url = ytURL + "/user/login";
 			login.login = ytLogin;
@@ -2490,7 +2550,7 @@
 			config.data.ytPassword = ytPassword;
 			config.flush();
 			errorMsg1 += "\nYouTrack credentials changed";
-			errorMsg2.text += "\nYouTrack credentials changed";
+			//errorMsg2.text += "\nYouTrack credentials changed";
 		}
 		
 		private function changeINCredentials(inURL:String, inLogin:String, inPassword:String):void {
@@ -2506,7 +2566,7 @@
 			oEncoder.encode(inLogin + ":" + inPassword); 
 			
 			inflowUploader.headers = {Authorization:"Basic " + oEncoder.toString()}; 
-			errorMsg2.text += "\nInflow credentials changed";
+			//errorMsg2.text += "\nInflow credentials changed";
 			errorMsg1 += "\nInflow credentials changed";
 		}
 		
@@ -2553,7 +2613,70 @@
 		private function buildToolTip(item:Object):String{
 			return getTicketName(item, null);
 		}
-	]]>
+			
+		protected function ApplyYTFilter_clickHandler(event:MouseEvent):void
+		{
+			setYTFilter(YTFilter.text);
+		}
+		
+		protected function ResetYTFilter_clickHandler(event:MouseEvent):void
+		{
+			setYTFilter("assignee:me+state:unresolved");
+		}
+
+		private function setYTFilter(filter:String):void{
+			YTFilter.text = filter;
+			config.data.ytFilter=filter;
+			config.flush();
+			refreshYTIssues(inflowPrefTreeView.selectedItem as XML);						
+		}
+			
+		public function getYTColor(data:XML):uint
+		{
+			if (data.@ytReported == stateReported)
+			{
+				return StyleManager.getColorName('#00FF7F');
+			}
+			else if (data.@ytReported == stateFailed)
+			{
+				return StyleManager.getColorName('red');
+			}
+			else
+			{
+				return StyleManager.getColorName('none');
+			}
+		}
+			
+			public function getinColor(data:XML):uint
+			{
+				if (data.@inReported == stateReported)
+				{
+					return StyleManager.getColorName('#00FF7F');
+				}
+				else if (data.@inReported == stateFailed)
+				{
+					return StyleManager.getColorName('red');
+				}
+				else
+				{
+					return StyleManager.getColorName('none');
+				}
+			}
+					
+			protected function button1_clickHandler(event:MouseEvent):void
+			{
+				// TODO Auto-generated method stub
+				var url:URLRequest = new URLRequest(config.data.ytURL + "/issue/" + newTaskYTCode.text);
+				navigateToURL(url);
+			}
+			
+			public function linkHandler(event:MouseEvent):void
+			{
+				var url:URLRequest = new URLRequest(config.data.ytURL + "/issue/" + (event.currentTarget.data as XML).@id);
+				navigateToURL(url);
+			}
+			
+		]]>
     </mx:Script>
     <mx:HTTPService id="inflowTree" url="http://appli.pulsar.be/inFlowTracerPlus-rest/tree/" useProxy="false" 
     	method="POST"
@@ -2613,8 +2736,8 @@
    	<mx:Canvas id="trees" width="30%" height="100%" minWidth="400">
 	    <mx:TabNavigator x="3" y="3" width="100%" height="100%" id="tabnavigator1" change="changedTab(event)">
 	      <mx:Canvas label="Full" width="100%" height="10%" id="canvas1"  >
-			  <mx:VBox height="100%" width="100%">
-		         <mx:HBox  width="100%" height="50%" paddingLeft="2" paddingRight="2" paddingBottom="2" paddingTop="2">
+			  <mx:VDividedBox height="100%" width="100%">
+		         <mx:HDividedBox  width="100%" height="50%" paddingLeft="2" paddingRight="2" paddingBottom="2" paddingTop="2" >
 					 <mx:VBox width="50%" height="100%">
 		            <mx:Tree id="inflowTreeView" width="100%" height="95%" dataProvider="{inflowTreeData}" labelField="data" labelFunction="treeLabel" 
 		            	showRoot="true" itemRenderer="myComponents.MyTreeItemRenderer" doubleClickEnabled="true" 
@@ -2627,7 +2750,7 @@
 		            <mx:Tree id="inflowTypesView" width="50%" height="100%" dataProvider="{inflowTypesData}" labelField="data" labelFunction="treeLabel" 
 		               	showRoot="false" itemRenderer="myComponents.MyTreeItemRenderer" doubleClickEnabled="true" doubleClick="selectInflowTypeNode(event);" dataDescriptor="{new myComponents.TypeTreeDataDescriptor}" >
 		            </mx:Tree>
-				 </mx:HBox>
+				 </mx:HDividedBox>
 					 <mx:DataGrid id="ytTickets0" width="100%" height="50%" dataProvider="{youTrackProjectTicketList.list}" doubleClickEnabled="true" doubleClick="selectYTTicket(event)" dataTipFunction="buildToolTip">
 						 <mx:columns>
 							 <mx:DataGridColumn headerText="id" dataField="@id" width="{Math.round(this.ytTickets0.width * 0.33)}"/>
@@ -2635,11 +2758,11 @@
 							</mx:DataGridColumn>
 						 </mx:columns>
 					 </mx:DataGrid>
-			  </mx:VBox>
+			  </mx:VDividedBox>
 	      </mx:Canvas>
 	      <mx:Canvas label="Preferred" width="100%" height="100%" id="canvas2">
-			  <mx:VBox height="100%" width="100%">
-				  <mx:HBox width="100%" height="50%" paddingLeft="2" paddingRight="2" paddingBottom="2" paddingTop="2">
+			  <mx:VDividedBox height="100%" width="100%">
+				  <mx:HDividedBox width="100%" height="50%" paddingLeft="2" paddingRight="2" paddingBottom="2" paddingTop="2">
 					  <mx:Tree id="inflowPrefTreeView" width="50%" height="100%" dataProvider="{inflowPrefTreeData}" labelField="data" labelFunction="treeLabel" 
 							   showRoot="true" itemRenderer="myComponents.MyPrefTreeItemRenderer" doubleClickEnabled="true" doubleClick="selectInflowNode(event);" itemClick="loadYTIssues(event)" 
 							   itemOpen="savePrefNodeState(event);" itemClose="savePrefNodeState(event);" dataDescriptor="{new myComponents.PrefTreeDataDescriptor}" creationComplete="showPrefTree(event);"> 
@@ -2647,14 +2770,30 @@
 						  <mx:Tree id="inflowPrefTypesView" width="50%" height="100%" dataProvider="{inflowTypesData}" labelField="data" labelFunction="treeLabel" 
 								   showRoot="false" itemRenderer="myComponents.MyTreeItemRenderer" doubleClickEnabled="true" doubleClick="selectInflowTypeNode(event);" dataDescriptor="{new myComponents.TypeTreeDataDescriptor}">
 						  </mx:Tree>
-				  </mx:HBox>	      	
-				  <mx:DataGrid id="ytTickets1" width="100%" height="50%" dataProvider="{youTrackProjectTicketList.list}" doubleClickEnabled="true" doubleClick="selectYTTicket(event)" dataTipFunction="buildToolTip">
-					  <mx:columns>
-						  <mx:DataGridColumn headerText="id" dataField="@id" width="{Math.round(this.ytTickets1.width * 0.33)}"/>
-						  <mx:DataGridColumn headerText="description" dataField="field.value" labelFunction="getTicketName" showDataTips="true"/>
-					  </mx:columns>
-				  </mx:DataGrid>
-			  </mx:VBox>
+				  </mx:HDividedBox>
+				  <mx:VBox width="100%" height="50%">
+					  <mx:HBox width="100%">
+						  <mx:TextInput id="YTFilter" width="100%" text="{config.data.ytFilter}"/>
+						  <mx:Button id="ApplyYTFilter" label="Apply"
+									 click="ApplyYTFilter_clickHandler(event)"/>
+						  <mx:Button id="ResetYTFilter" label="Reset"
+									 click="ResetYTFilter_clickHandler(event)"/>
+					  </mx:HBox>
+					  <mx:DataGrid id="ytTickets1" width="100%" height="95%" dataProvider="{youTrackProjectTicketList.list}" doubleClickEnabled="true" doubleClick="selectYTTicket(event)" dataTipFunction="buildToolTip">
+						  <mx:columns>
+							  <mx:DataGridColumn headerText="id" dataField="@id" width="{Math.round(this.ytTickets1.width * 0.45)}">
+							  	<mx:itemRenderer>
+									<mx:Component>
+										<mx:LinkButton label="{data.@id}" useHandCursor="true"  textDecoration="underline" click="outerDocument.linkHandler(event);">  
+										</mx:LinkButton> 
+									</mx:Component>									
+								</mx:itemRenderer>
+							  </mx:DataGridColumn>
+							  <mx:DataGridColumn headerText="description" dataField="field.value" labelFunction="getTicketName" showDataTips="true"/>
+						  </mx:columns>
+					  </mx:DataGrid>
+				  </mx:VBox>
+			  </mx:VDividedBox>
 <!--		         <mx:Button x="371" y="679" label="Start timer" width="92" id="startPrefTimerBtn" click="startNewPrefTaskClick(event)" height="25"/>
 		         <mx:TextInput x="10" y="680" id="newPrefTaskName" width="353"/> -->
 	      </mx:Canvas>
@@ -2779,22 +2918,28 @@
 		      	<mx:DateField x="235.5" y="14" id="dtDateToDisplay" change="displaySelectedDate()" formatString="YYYY/MM/DD HH:MM"/>
 		      	<mx:CheckBox x="940" y="37" label="InFlow" id="chkInFlow" selected="true" visible="false"/>
 		      	<mx:CheckBox x="940" y="57" label="YouTrack" id="chkYouTrack" selected="true" visible="false"/>
+			  <mx:Button x="1092" y="15" label="A propos" click="showAPropos();"/>
 		  </mx:Canvas>
 		  <mx:Canvas width="100%" height="{grids.height - topButtonBox.height - bottomButtonBox.height - 20}">
 		  	
 		  <mx:DataGrid id="grid" x="5" editable="false" dataProvider="{perfGrid}" height="100%" width="100%" itemClick="itemClicked(event);" variableRowHeight="true" sortableColumns="false" allowMultipleSelection="true"> 
 		      <mx:columns>
-		      	<mx:DataGridColumn headerText="YT code" dataField="ytCode" editable="false" width="50" >
+		      	<mx:DataGridColumn headerText="YT code" dataField="ytCode" editable="false" width="50" resizable="false" >
 		      	         <mx:itemRenderer>
 		      	          	<mx:Component>
-		      	          	   	<mx:Text width="100%" text="{XML(data).@ytCode}" toolTip="{XML(data).@ytCdoe}"/>
+								<mx:Box borderStyle="solid" backgroundColor="{outerDocument.getYTColor(XML(data))}">
+									<mx:Text width="100%" text="{XML(data).@ytCode}" toolTip="{XML(data).@ytCode}" >
+									</mx:Text>
+								</mx:Box>
 		      	          	   </mx:Component>
 		      	          </mx:itemRenderer>				
 		      	</mx:DataGridColumn>
 		      	<mx:DataGridColumn headerText="Project" dataField="path" editable="false" width="125" >
 		      	         <mx:itemRenderer>
 		      	          	<mx:Component>
-		      	          	   	<mx:Text width="100%" text="{XML(data).@path.split('/',1)[0]}" toolTip="{XML(data).@path}"/>
+								<mx:Box borderStyle="solid" backgroundColor="{outerDocument.getinColor(XML(data))}">
+		      	          	   		<mx:Text width="100%" text="{XML(data).@path.split('/',1)[0]}" toolTip="{XML(data).@path}"/>
+								</mx:Box>
 		      	          	   </mx:Component>
 		      	          </mx:itemRenderer>				
 		      	</mx:DataGridColumn>
@@ -2827,7 +2972,7 @@
 		      			</mx:Component>
 		      		</mx:itemRenderer> -->
 		      	</mx:DataGridColumn>
-		        <mx:DataGridColumn headerText="" width="40" id="takeOneColumn1" editable="false">
+		        <mx:DataGridColumn headerText="" width="40" id="takeOneColumn1" editable="false" resizable="false">
 		            <mx:itemRenderer>
 		                  	<mx:Component>
 	                      			<mx:VBox>
@@ -2837,21 +2982,21 @@
 		                      	</mx:Component>
 		            </mx:itemRenderer>
 		        </mx:DataGridColumn>
-		      	<mx:DataGridColumn headerText="Start" dataField="@start" editable="false" width="40" fontWeight="bold">
+		      	<mx:DataGridColumn headerText="Start" dataField="@start" editable="false" width="40" fontWeight="bold" resizable="false" >
 		      		<mx:itemRenderer>
 						<mx:Component>
 		      		         	   	<mx:Text width="100%" text="{outerDocument.formatTime(XML(data).@start)}" />
 						</mx:Component>
       		       	</mx:itemRenderer>				
 		      	</mx:DataGridColumn>
-		      	<mx:DataGridColumn headerText="Duration" dataField="duration" editable="false" width="60" fontWeight="bold">
+		      	<mx:DataGridColumn headerText="Duration" dataField="duration" editable="false" width="60" fontWeight="bold" resizable="false">
 		      		<mx:itemRenderer>
 		      		         	<mx:Component>
 		      		         	   	<mx:Text width="100%" text="{outerDocument.shortFormatDuration(XML(data).@duration)}"/>
 		      		         	</mx:Component>
 		      		          </mx:itemRenderer>
 		      	</mx:DataGridColumn>
-		      	<mx:DataGridColumn headerText="End" dataField="end" editable="false" width="40" visible="true" fontWeight="bold">
+		      	<mx:DataGridColumn headerText="End" dataField="end" editable="false" width="40" visible="true" fontWeight="bold" resizable="false">
 		      		<mx:itemRenderer>
 		      		         	<mx:Component>
 		      		         	   	<mx:Text width="100%" text="{outerDocument.formatTime(XML(data).@end)}" />
@@ -2885,75 +3030,93 @@
 		                      	</mx:Component>
 		                       </mx:itemRenderer>
 		             </mx:DataGridColumn>
-		             <mx:DataGridColumn headerText="" width="35" id="resumeColumn" editable="false">
-		             <mx:itemRenderer>
-		                      	<mx:Component>
-		                      	<mx:Button click="outerDocument.resumeClicked(event)" icon="@Embed(source='/icons/Time-Machine-32.png')" toolTip="Resume"/>
-		                      	</mx:Component>
-		                       </mx:itemRenderer>
+		             <mx:DataGridColumn headerText="" width="42" id="resumeColumn" editable="false" resizable="false" >
+		             	<mx:itemRenderer>
+		                	<mx:Component>
+								<mx:HBox xmlns:mx="http://www.adobe.com/2006/mxml" horizontalAlign="center" verticalAlign="middle">
+		                      		<mx:Button click="outerDocument.resumeClicked(event)" icon="@Embed(source='/icons/trackback.png')" toolTip="Resume" width="42" height="42" />
+								</mx:HBox>
+		                    </mx:Component>
+		                </mx:itemRenderer>
 		             </mx:DataGridColumn>
-		             <mx:DataGridColumn headerText="" width="35" id="deleteColumn2" editable="false">
-		             <mx:itemRenderer>
+		             <mx:DataGridColumn headerText="" width="42" id="deleteColumn2" editable="false" resizable="false">
+		             	<mx:itemRenderer>
 		                      	<mx:Component>
-		                      	<mx:Button click="outerDocument.deleteClicked(event)" icon="@Embed(source='/icons/Trash-Empty-32.png')" toolTip="Delete"/>
+								<mx:HBox xmlns:mx="http://www.adobe.com/2006/mxml" horizontalAlign="center" verticalAlign="middle">
+		                      		<mx:Button click="outerDocument.deleteClicked(event)" icon="@Embed(source='/icons/delete.png')" toolTip="Delete" width="42" height="42"/>
+								</mx:HBox>
 		                      	</mx:Component>
-		                       </mx:itemRenderer>
+		                </mx:itemRenderer>
 		             </mx:DataGridColumn>
-		             <mx:DataGridColumn headerText="" width="35" id="uploadColumn" editable="false">
-		                  <!--mx:itemRenderer>
-		                  <mx:Component>
-		                  <mx:Button click="outerDocument.uploadClicked(event)" icon="@Embed(source='/icons/iSync-32.png')" toolTip="Upload" visible="{outerDocument.uploadable(data.@state, data.@duration)?true:false}"/>
-		                  </mx:Component>
-		                  </mx:itemRenderer-->
+		             <mx:DataGridColumn headerText="" width="42" id="uploadColumn" editable="false" resizable="false">
 		                  <mx:itemRenderer>
 		                  	<mx:Component>
-		                  		<mx:HBox xmlns:mx="http://www.adobe.com/2006/mxml" horizontalGap="2"
-		                  		width="100%" height="100%" horizontalAlign="center" verticalAlign="middle">
+		                  		<mx:HBox xmlns:mx="http://www.adobe.com/2006/mxml" horizontalAlign="center" verticalAlign="middle">
 		                  		<mx:Script>
 						   <![CDATA[
-						   	import mx.messaging.AbstractConsumer;
 						   	import mx.controls.Button;
 						   	import mx.controls.Image;
+						   	import mx.messaging.AbstractConsumer;
 						    private var _data:Object;
-							[Embed('/icons/iSync-32.png')]
-						     public var uploadIcon:Class;
+							[Embed('/icons/Cloud_arrow_up.png')]
+						    public var uploadIcon:Class;
 						
-						   
 							override public function set data(value:Object):void
 						    {
 						    	_data = value;
 								var rating:Number = Number(value.rating);
 						       	removeAllChildren();
 						        var perf:XML = value as XML;
-								if (uploadable(perf.@state,perf.@duration)) {
+								if (isUploadable(perf)) {
 									var btn: Button = new Button();
-									//btn.height=32;
-									btn.width=32;
+									btn.height=42;
+									btn.width=42;
 									btn.setStyle('icon',uploadIcon);
 									btn.addEventListener(MouseEvent.CLICK,outerDocument.uploadClicked);
-									addChild(btn);			
+									addChild(btn);
+									//var idx:int = (value as DataRow).
 								}
 						    }
 								
-							 override public function get data():Object
-						     {
+							override public function get data():Object
+						    {
 						       return _data;
-						     }
+						    }
 						
-						   		public function uploadable(state:String, duration:String):Boolean {
-									if (state == 'reported' || state == 'undefined' || duration=='') {
-										return false;
-									} else {
-										return true;
-									}
-								}
+							public function isUploadable(perf:XML):Boolean {
+							   if (!perf.hasOwnProperty('@duration') || perf.@duration=='0') return false;
+							   if (!perf.hasOwnProperty('@type') || perf.@type =='') return false;
+							   if (perf.@name =='') return false;
+							   if (perf.@task =='') return false;
+							   if (outerDocument.isYTProject(perf.@path.split('/',1)[0]) && perf.hasOwnProperty("@ytReported") && perf.@ytReported == outerDocument.stateReported && perf.hasOwnProperty("@inReported") && perf.@inReported == outerDocument.stateReported) return false;
+							   if (!outerDocument.isYTProject(perf.@path.split('/',1)[0]) && (!perf.hasOwnProperty("@ytReported") || perf.@ytReported == outerDocument.stateReported) && perf.hasOwnProperty("@inReported") && perf.@inReported == outerDocument.stateReported) return false;
+								   
+							   //if (perf.@duration != '' && perf.@path.split('/',1)[0] != '' && perf.@task != '' && perf.@type != '' && perf.@name != '')
+							   //{
+								   if (outerDocument.isYTProject(perf.@path.split('/',1)[0]))
+								   {
+										return (perf.hasOwnProperty("@ytCode") && perf.@ytCode != '');   
+								   }
+								   else
+								   {
+									   return true;
+								   }
+							   //}
+							   //else
+							   //{
+								//   return false;
+							   //}
+							}
 						   ]]>
 						 </mx:Script>
 		                  		</mx:HBox>
 		                  	</mx:Component>
 		                  </mx:itemRenderer>
 		             </mx:DataGridColumn>
-		      	<mx:DataGridColumn headerText="State" dataField="state" editable="false" width="60">
+				  <mx:DataGridColumn width="5" resizable="false">
+					  
+				  </mx:DataGridColumn>
+<!--		      	<mx:DataGridColumn headerText="State" dataField="state" editable="false" width="60">
 	      	         <mx:itemRenderer>
 	      	          	<mx:Component>
 	      	          	   	<mx:Text width="100%" text="{XML(data).@state}"/>
@@ -2969,27 +3132,35 @@
 	      	          		</mx:VBox>
 	      	          	</mx:Component>
 	      	          </mx:itemRenderer>				
-		      	</mx:DataGridColumn>
+		      	</mx:DataGridColumn> -->
 		      </mx:columns>
 		   </mx:DataGrid>
 		  </mx:Canvas>
 
-		  <mx:Canvas width="99%" height="249" bottom="2" x="5" y="5" id="bottomButtonBox">
-		   	<mx:TextInput x="80" y="12" id="newTaskYTCode" width="172" text="{grid.selectedItem.@ytCode}" change="changedYTCode();"/>
-		   	<mx:TextInput x="80" y="43" id="newTaskName" width="826" text="{grid.selectedItem.@name}" change="changedTitle();"/>
-		   	<mx:TextArea width="826" height="59" id="descriptionInput"  text="{grid.selectedItem.@description}" change="changedDescription();" top="69" left="80"/>
-		   	<mx:TextArea y="136" width="826" height="109" id="errorMsg2" left="80"/>
+		  <mx:Canvas width="99%" height="344" bottom="2" x="5" y="5" id="bottomButtonBox">
 		   	<mx:Button label="Copy" width="80" enabled="true" id="copyBtn" click="copyDescription();" right="46" top="40"/>
 		   	<mx:Button y="70" label="Paste" width="80" enabled="false" id="pasteBtn" click="pasteDescription();" right="46"/>
-		   	<mx:Button x="922" y="216" label="Version" click="readVersion();"/>
-		   	<mx:Label x="10" y="45" text="Title"/>
-		   	<mx:Label x="10" y="70" text="Description"/>
-		   	<mx:Label x="6" y="168" text="Logs"/>
-<!--		   	<mx:Button id="btnSetTakeDown" x="650" y="10" label="Button" enabled="false" click="btnSetTakeDownClick();" /> -->
 		   	<mx:TextInput id="txtDuration" x="723" y="12" text="" enabled="false" width="49"/>
 		   	<mx:Button id="btnSetTakeUp" x="780" y="10" label="Set duration" enabled="false" click="btnSetTakeUpClick();" />
-		   	<mx:Label x="10" y="14" text="YT code"/>
-		   	<mx:Button x="922" y="183" label="Save data" id="savePerfBtn" click="saveData();" height="25"/>
+		   	<mx:Button x="1032" y="182" label="Save data" id="savePerfBtn" click="saveData();" height="25"/>
+					<mx:TabNavigator x="10" y="20" width="1009" height="307">
+						<mx:Canvas width="100%" height="100%" label="Task">
+							<mx:TextInput x="70" y="10" id="newTaskYTCode" width="172" text="{grid.selectedItem.@ytCode}" change="changedYTCode();"/>
+							<mx:TextInput x="70" y="41" id="newTaskName" width="826" text="{grid.selectedItem.@name}" change="changedTitle();"/>
+							<mx:TextArea id="descriptionInput" x="70" y="67" width="826" height="81"
+										 change="changedDescription();"
+										 text="{grid.selectedItem.@description}"/>
+							<mx:Label x="0" y="43" text="Title"/>
+							<mx:Label x="0" y="68" text="Description"/>
+							<mx:Label x="0" y="12" text="YT code"/>
+							<mx:Button x="263" y="10" label="Button"
+									   click="button1_clickHandler(event)"/>
+						</mx:Canvas>
+						<mx:Canvas width="100%" height="100%" label="Log">
+							<mx:Label x="10" y="10" text="Logs"/>
+							<mx:TextArea id="txtLog" x="46" y="9" width="951" height="255" text="{log}"/>
+						</mx:Canvas>
+					</mx:TabNavigator>
 		   </mx:Canvas>
  		</mx:VBox>
     </mx:Canvas>

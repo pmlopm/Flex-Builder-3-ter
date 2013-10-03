@@ -4,8 +4,8 @@
 		private var UNDEFINED:String = "--Undefined--";
 		private var stateUndefined:String="undefined";
 		private var stateDefined:String="defined";
-		private var stateReported:String="reported";
-		private var stateFailed:String="failed";
+		public var stateReported:String="reported";
+		public var stateFailed:String="failed";
 
         public function isToday(date:Date) : Boolean
         {

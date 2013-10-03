@@ -1,0 +1,3371 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:WindowedApplication xmlns:mx="http://www.adobe.com/2006/mxml" xmlns:s= "http://ns.adobe.com/flex/spark" xmlns:myComponents="myComponents.*" layout="absolute" width="1650" height="810" 
+	creationComplete="initializeApp()">
+     <mx:Script>
+     	<![CDATA[
+			import com.as3xls.cdf.CDFReader;
+			import com.as3xls.xls.ExcelFile;
+			import com.as3xls.xls.Sheet;
+			import com.moralyx.xml.FleXMLer;
+			
+			import flash.events.KeyboardEvent;
+			import flash.sampler.getInvocationCount;
+			import flash.trace.Trace;
+			
+			import mx.collections.ArrayCollection;
+			import mx.collections.IList;
+			import mx.collections.ListCollectionView;
+			import mx.collections.Sort;
+			import mx.collections.SortField;
+			import mx.collections.XMLListCollection;
+			import mx.containers.GridRow;
+			import mx.containers.VBox;
+			import mx.controls.Alert;
+			import mx.controls.List;
+			import mx.events.CloseEvent;
+			import mx.events.DataGridEvent;
+			import mx.events.DragEvent;
+			import mx.events.FlexEvent;
+			import mx.events.ItemClickEvent;
+			import mx.events.ListEvent;
+			import mx.events.NumericStepperEvent;
+			import mx.events.TreeEvent;
+			import mx.formatters.Formatter;
+			import mx.managers.PopUpManager;
+			import mx.messaging.SubscriptionInfo;
+			import mx.rpc.AsyncToken;
+			import mx.rpc.events.FaultEvent;
+			import mx.rpc.events.ResultEvent;
+			import mx.utils.Base64Encoder;
+			import mx.utils.ObjectProxy;
+			
+			import myComponents.*;
+			import myComponents.Task;
+        
+     	include "myComponents/myASFile.as";
+     	include "myComponents/ViewWeek.as";
+
+        private var username:String = '';
+        private var password:String = '';
+         
+  		[Bindable]
+   		public var perfList:XML;
+   		[Bindable]
+   		public var perfGrid:XMLListCollection;
+   		[Bindable]
+   		public var perfGridMonday:XMLListCollection;
+   		[Bindable]
+   		public var perfGridTuesday:XMLListCollection;
+   		[Bindable]
+   		public var perfGridWednesday:XMLListCollection;
+   		[Bindable]
+   		public var perfGridThursday:XMLListCollection;
+   		[Bindable]
+   		public var perfGridFriday:XMLListCollection;
+   		[Bindable]
+   		public var weekGrid:XMLListCollection;
+   		[Bindable]
+   		public var weekByDayGrid:XMLListCollection;
+   		[Bindable]
+   		public var recentTaskList:XMLListCollection;
+		[Bindable]
+		public var recentTaskTree:XMLListCollection;
+
+        [Bindable]
+   		public var taskList:XML;
+   		[Bindable]
+   		public var taskGrid:XMLListCollection;
+
+        private var currentTask:XML;
+
+		import mx.collections.ArrayCollection;
+		[Bindable]
+		private var statsCollection:ArrayCollection;
+
+	    [Bindable]
+	    private var rssData:XML;
+
+		private var ticker:Timer;
+        
+        [Bindable]
+        private var config : SharedObject;
+			
+		[Bindable]
+		private var log : String;
+        
+        // Additional import statement to use the TitleWindow container.
+        import mx.containers.TitleWindow;
+        
+  		private function initializeApp():void {
+			config = SharedObject.getLocal("PersonalTimeKeeper5Config");
+			initializeYT(config);
+			initializeIn(config);
+						
+ 			init();
+
+        	this.addEventListener(Event.CLOSING, closingApplication);
+        	this.addEventListener(NativeWindowDisplayStateEvent.DISPLAY_STATE_CHANGING, minimizing);
+			
+			//initCredentials();
+
+			inflowTypesData = loadLocalFile(config.data.typesFileName==null?"PersonalTimeKeeper5/InflowTypes.xml":config.data.typesFileName);
+			if (inflowTypesData == null) {
+				inflowTypes.send();
+			}
+			var d:DataGrid;
+			for each (var type : XML  in inflowTypesData.children())
+			{
+               	if (type.@name.indexOf("---") != -1) {
+               		var t:Label = new Label();
+               		t.text = type.@name;
+               		d.addChild(t);	
+                } else {
+	               	var c:Canvas = new Canvas();
+     	            d = new DataGrid();
+        	        c.label = type.@name;
+            	    c.addChild(d);
+                	//typesAccordion.addChild(c);
+                }
+			}
+
+			inflowTreeData = loadLocalFile("PersonalTimeKeeper5/InflowTree.xml");
+			if (inflowTreeData == null) {
+				inflowTree.send();
+			}
+			expandTree();
+			inflowPrefTreeData = loadLocalFile("PersonalTimeKeeper5/InflowPrefTree.xml"	);
+			if (inflowPrefTreeData == null) {
+				copyLocalFile("PersonalTimeKeeper5/InflowTree.xml","PersonalTimeKeeper5/InflowPrefTree.xml");
+				inflowPrefTreeData = loadLocalFile("PersonalTimeKeeper5/InflowPrefTree.xml"	);
+			}
+			expandPrefTree();
+			inflowTodoData = loadLocalFile("PersonalTimeKeeper5/InflowTasks.xml"	);
+			
+			tabnavigator1.selectedIndex=config.data.selectedTab;
+			
+		}
+			
+		private function init():void
+		{
+        	prepareClockTimer();
+        	prepareInactivityDetection();
+        	loadRecentTaskList();
+        	loadRecentTaskTree();
+        	
+        	loadPrefTreeView();
+        	displayDate = new Date();
+        	loadPerf(displayDate);
+        	loadTaskbar();
+          	loadTask(displayDate);
+        	startDay();
+			addTaskScreen = new TaskPopup();
+			addTaskScreen.addEventListener("SaveTask", saveTask);
+			tabnavigator1.selectedIndex=1;	
+			systemManager.stage.addEventListener(KeyboardEvent.KEY_DOWN,captureSpecialKeys);	
+			systemManager.stage.addEventListener(KeyboardEvent.KEY_UP,captureSpecialKeys);
+			loadYTProjectList();
+			
+			if (!config.data.hasOwnProperty("ytFilter"))
+			{
+				config.data.ytFilter = "assignee:me+state:unresolved";
+				config.flush();
+			}
+      	}
+			
+		private function initializeYT(config:SharedObject):void
+		{
+			log += "\nInitialize YouTrack connectors";
+			youTrackLogin.rootURL = config.data.ytURL;
+			youTrackLogin.url = config.data.ytURL;
+			youTrackUploader.rootURL = config.data.ytURL;
+			youTrackUploader.url = config.data.ytURL;		
+			youTrackProjects.url = config.data.ytURL;
+		}
+			
+		private function initializeIn(config:SharedObject):void
+		{
+			log += "\nInitialize Inflow connector";
+			inflowUploader.url = config.data.inURL;
+			var oEncoder:Base64Encoder = new Base64Encoder(); 
+			oEncoder.insertNewLines = false; 
+			oEncoder.encode(config.data.inLogin + ":" + config.data.inPassword); 
+			inflowUploader.headers = {Authorization:"Basic " + oEncoder.toString()};				
+		}
+        
+        private function loadYTProjectList():void
+        {
+			log += "\nLoad YouTrack project list";
+			var login :Object = new Object();
+			//youTrackProjects.concurrency="single";
+			youTrackLogin.url = config.data.ytURL + "/rest/user/login";
+			login.login = config.data.ytLogin;
+			login.password = config.data.ytPassword;
+
+			youTrackLogin.addEventListener(ResultEvent.RESULT, youTrackLoginResultHandler1);
+			youTrackLogin.addEventListener(FaultEvent.FAULT, youTrackLoginFaultHandler1);
+			youTrackLogin.send(login);
+			youTrackProjects.url = youTrackProjects.rootURL;
+        }
+        
+		private function youTrackLoginResultHandler1(event:ResultEvent):void {
+			errorMsg1 += "\nYouTrack Login successful, starting project list download";
+			log += "\nYouTrack Login successful, starting project list download";
+			youTrackProjects.url = config.data.ytURL + '/rest/project/all';
+			youTrackProjects.addEventListener(ResultEvent.RESULT, youTrackProjectsResultHandler);
+			youTrackProjects.addEventListener(FaultEvent.FAULT,youTrackProjectsFaultHandler);
+			var myToken:AsyncToken = youTrackProjects.send(null); 
+		}
+		
+		private function youTrackLoginFaultHandler1(event:FaultEvent):void {
+			if (event.statusCode != 401) {
+				log += "\nYouTrack Login error " + event.statusCode;
+			}
+			errorMsg1 += "\nYouTrack Login error";
+			errorMsg1 = event.message.toString();
+		}
+		
+		private function youTrackProjectsResultHandler(event:ResultEvent):void {
+			youTrackProjectList = new XMLListCollection(new XMLList((event.result as XML).project));
+			errorMsg1 += "\nYouTrack Project list upload successful";
+			log += "\nYouTrack Project list upload successful";
+			
+			errorMsg1 += "\nYouTrack Project ToDo list download starting";
+			log += "\nYouTrack Project ToDo list download starting";
+			youTrackToDo.url = config.data.ytURL + '/rest/issue?filter=' + YTFilter.text;// assignee:me+state:unresolved';
+			youTrackToDo.addEventListener(ResultEvent.RESULT, youTrackToDoResultHandler);
+			youTrackToDo.addEventListener(FaultEvent.FAULT,youTrackToDoFaultHandler);
+			var myToken:AsyncToken = youTrackToDo.send(null); 
+		}
+		
+		private function youTrackProjectsFaultHandler(event:FaultEvent):void {
+			if (event.statusCode != 401) {
+				log += "\nYouTrack Project list upload failed, error: " + event.statusCode;
+			}
+			errorMsg1 += "\nYouTrack Proejct list upload failed, error:";
+			errorMsg1 = event.message.toString();
+		}
+
+         private function YTProjectClicked(e:MouseEvent):void
+         {
+	        var node:XML = (e.currentTarget as Tree).selectedItem as XML;
+			errorMsg1 += "\nYouTrack Project";
+			log += "\nYouTrack Project";
+//			youTrackProjectIssues.url = config.data.ytURL + '/rest/issue?max=9999&filter=project:' + node.@shortName + "+" +config.data.ytFilter;
+//			youTrackProjectIssues.addEventListener(ResultEvent.RESULT, youTrackProjectTicketsResultHandler);
+//			youTrackProjectIssues.addEventListener(FaultEvent.FAULT,youTrackProjectTicketsFaultHandler);
+//			var myToken2:AsyncToken = youTrackProjectIssues.send(null);
+			YTProjectSelected(node.@shortName);
+         }
+         
+		private function youTrackProjectTicketsResultHandler(event:ResultEvent):void {
+			youTrackProjectTicketList = new XMLListCollection(new XMLList((event.result as XML).issue));
+			var arr:Array = youTrackProjectIssues.url.split(':',3);
+			var node:XML = inflowPrefTreeView.selectedItem as XML
+	        //saveXMLToFile(youTrackProjectTicketList,"PersonalTimeKeeper5/YT_" + node.@name + ".xml");
+			errorMsg1 += "\nYouTrack ProjectTickets";
+			errorMsg1 = event.result.toString();
+		}
+		
+		private function youTrackProjectTicketsFaultHandler(event:FaultEvent):void {
+			if (event.statusCode != 401) {
+				log += "\nYouTrack Project Tickets loading failed, error: " + event.statusCode;
+			}
+			errorMsg1 += "\nYouTrack Project Tickets loading error";
+			errorMsg1 = event.message.toString();
+		}
+        
+        
+        
+        private function youTrackToDoResultHandler(event:ResultEvent):void {
+        	youTrackToDoList = new XMLListCollection(new XMLList((event.result as XML).issue));	
+        }
+        
+        private function youTrackToDoFaultHandler(event:FaultEvent):void {
+			errorMsg1 += "\nYouTrack ToDo loading error";
+			errorMsg1 = event.message.toString();
+        	log += "\nYouTrack ToDo loading error " + event.message.toString();
+        }
+        
+		private function readXL(filePath:String):ExcelFile {
+			var file:File = File.documentsDirectory.resolvePath(filePath);
+			if (file.exists) {
+				var fileStream:FileStream = new FileStream();
+				fileStream.open(file, FileMode.READ);
+				var myByteArray:ByteArray = new ByteArray();
+				fileStream.readBytes(myByteArray,0,fileStream.bytesAvailable);
+				var xls:ExcelFile = new ExcelFile();
+				xls.loadFromByteArray(myByteArray);
+				return xls;
+			} else {
+				return null;
+			}
+		}
+			
+		private function insertTask():void {
+            if (grid.selectedItems.length == 2) {
+	            var i: int;
+	            var first:int;
+	            if (grid.selectedIndices[0] > grid.selectedIndices[1])
+	            {
+	            	i = grid.selectedIndices[0];
+	            	first=0;
+	            } else {
+	            	i=grid.selectedIndices[1];
+	            	first=1;
+	            }
+          	            
+				insertTaskAt(first);
+	    	}
+	    	else
+	    	{
+	    		if (perfGrid.length == 0)
+	    		{
+	    			insertFirstTask();
+	    		}
+	    	}
+		} 
+
+
+		private function insertTaskAbove():void {
+			insertTaskAt(0);
+		}
+		
+		private function insertTaskBelow():void {
+	            var newNode:XML = <perf/>;
+	            var i:int = grid.selectedIndex; //perfGrid.length;
+	            newNode.@start = perfGrid.getItemAt(i).@start; //grid.selectedItems[first].@end;
+	            newNode.@end = newNode.@start;
+	            newNode.@description = "";
+	            newNode.@name = "";
+	            newNode.@appId = "";
+	            newNode.@status = "";
+	            descriptionInput.text = "";
+	            newNode.@task = UNDEFINED;
+	            newNode.@state = stateUndefined;
+	            
+	        	perfGrid.addItemAt(newNode, i+1);
+	         	grid.selectedIndex = i+1;
+	         	saveData();
+		}
+		
+		private function insertTaskAt(first: int):void {
+			if (grid.selectedItems[first].@end == "")
+			{
+				startTimerBtn.dispatchEvent(new MouseEvent(MouseEvent.CLICK));	
+			} else
+			{
+				var i:int = grid.selectedIndices[first];
+	            var newNode:XML = <perf/>;
+	            newNode.@start = grid.selectedItems[first].@end;
+	            newNode.@end = newNode.@start;
+	            newNode.@description = "";
+	            newNode.@name = "";
+	            newNode.@appId = "";
+	            newNode.@status = "";
+	            descriptionInput.text = "";
+	            newNode.@task = UNDEFINED;
+	            newNode.@state = stateUndefined;
+	            
+	        	perfGrid.addItemAt(newNode, i);
+	         	grid.selectedIndex = i;
+	         	saveData();
+	  		}
+		}
+		
+		private function insertFirstTask():void {
+	            var newNode:XML = <perf/>;
+	            newNode.@start = dateFormatter.format(displayDate);
+	            newNode.@end = newNode.@start;
+	            newNode.@description = "";
+	            newNode.@name = "";
+	            newNode.@appId = "";
+	            newNode.@status = "";
+	            descriptionInput.text = "";
+	            newNode.@task = UNDEFINED;
+	            newNode.@state = stateUndefined;
+	            
+	        	perfGrid.addItemAt(newNode, 0);
+	         	grid.selectedIndex = 0;
+	         	saveData();
+		}
+		
+		private function splitTask():void {
+			
+			grid.selectedIndex = 0;
+			if (grid.selectedItems.length == 1) {
+
+				var newNode2:XML = <perf/>;
+	            newNode2.@start = grid.selectedItem.@end;
+	            newNode2.@end = newNode2.@start;
+	            newNode2.@description = grid.selectedItem.@description;
+	            newNode2.@name = grid.selectedItem.@name;
+	            newNode2.@appId = grid.selectedItem.@appId;
+	            newNode2.@typeId = grid.selectedItem.@typeId;
+	            newNode2.@type = grid.selectedItem.@type;
+	            newNode2.@status = "";
+	            descriptionInput.text = "";
+	            newNode2.@task = grid.selectedItem.@task;
+	            newNode2.@path = grid.selectedItem.@path;
+	            newNode2.@state = grid.selectedItem.@state;
+
+       			endTask(inflowPrefTreeView, inflowPrefTypesView, "");
+       			grid.selectedIndex = 0;
+       			endTask(inflowPrefTreeView, inflowPrefTypesView, "");
+       			grid.selectedIndex = 0;
+  				grid.selectedItem.@name = newNode2.@name;
+  				grid.selectedItem.@appId = newNode2.@appId;
+  				grid.selectedItem.@typeId = newNode2.@typeId;
+  				grid.selectedItem.@type = newNode2.@type;
+				grid.selectedItem.@description = newNode2.@description;
+	            grid.selectedItem.@task = newNode2.@task;
+	            grid.selectedItem.@path = newNode2.@path;
+	            grid.selectedItem.@state = newNode2.@state;
+	            			  				     			
+   	         	saveData();
+				
+			}
+		}
+		
+        private function startTimer(projTree:Tree, typeTree:Tree, taskName:String):void
+        {            
+            displayToday();
+            startTimerImpl(projTree, typeTree, taskName);
+        }
+        
+        private function startTimerImpl(projTree:Tree, typeTree:Tree, taskName:String):void
+        {
+            var newNode:XML = <perf/>;
+            newNode.@start = dateFormatter.format(displayDate); //new Date());
+            newNode.@description = "";
+            newNode.@name = taskName;
+            newNode.@end = "";
+            newNode.@appId = "";
+            newNode.@status = "";
+            descriptionInput.text = "";
+            newNode.@task = UNDEFINED;
+            newNode.@state = stateUndefined;
+            if (perfGrid == null) {
+            	perfGrid = new XMLListCollection();
+            }
+         	
+         	currentTask = newNode;
+         	var data:ObjectProxy = new ObjectProxy(currentTask);
+         	perfGrid.addItemAt(newNode, 0);
+         	grid.selectedIndex = 0;
+			savePerfBtn.enabled = true;
+			if (currentTask.@appId != '') {
+				var recentTask:XML = <perf appId='' typeId='' type='' task='' name=''/>;
+				recentTask.@appId=currentTask.@appId;
+				recentTask.@typeId=currentTask.@typeId;
+				recentTask.@type=currentTask.@type;
+				recentTask.@task=currentTask.@task;
+				recentTask.@name=currentTask.@name;
+				recentTask.@path=currentTask.@path;
+				recentTask.@isVisible="true";
+				var x:XMLList = recent..perf.(@task==recentTask.@task && @typeId==recentTask.@typeId && @appId==recentTask.@appId);
+				if (x.length() == 0) {
+					recentTaskList.addItem(recentTask);
+				}
+				if (recentTaskTree != null && recentTaskTree.source.length() > 0 && recentTask.@appId != "") {
+	           		var projects:XML  = recentTaskTree.source[0];
+	            	var proj:XMLList = projects..application.(@id==currentTask.@appId);
+	            	var obj:XMLList = proj.perf.(@typeId==recentTask.@typeId && @task==recentTask.@task && @path==recentTask.@path && @name==recentTask.@name);
+	            	if (obj.length() == 0) {
+		            	proj.appendChild(recentTask);
+		            }
+				}
+			}
+			saveData();
+        }
+        
+		public function endTask(projTree:Tree, typeTree:Tree, taskName:String):void
+		{
+			stopTimer();
+			currentDuration.text = "";
+			prepareClockTimer();
+			updateDayTotal();
+			startTimer(projTree, typeTree, taskName);
+		}
+		
+        private function stopTimer():void
+        {
+            currentTask.@end = dateFormatter.format(new Date());
+            currentTask.@duration = calculateDuration(currentTask.@end, currentTask.@start);
+         	savePerfBtn.enabled = true;
+         	saveData();
+        }
+        
+        private function loadTaskbar():void {
+        	for each (var task:XML in perfGrid) {
+        		addTaskToBar(task.@task,task.@duration);
+        	}
+        }
+        
+        private function addTaskToBar(title:String, duration:int) : void {			
+//			var txtArea : TextArea = new TextArea();
+//			txtArea.text = title;
+//			txtArea.width = duration;		
+//			trace(txtArea.width);
+//			bar.addChildAt(txtArea,bar.getChildren().length-1);
+        }
+        
+		private function refreshTrees():void {
+			inflowTree.send();
+			inflowTreeView.openItems = openTreeList;
+			inflowTypes.send();	
+		}
+			
+		private function refreshToDo():void {
+			var myToken:AsyncToken = youTrackProjects.send(null); 			
+		}
+		
+        private function expandTree():void{
+			openItemList = SharedObject.getLocal("openTreeItemList");
+			if (inflowTreeData != null) {
+				var root:XML = (XML)(inflowTreeData.getItemAt(0,0));
+				var node:XML;
+				for each (var object:XML in openItemList.data.openItems) {
+					if (object.name() == "root") {
+						trace("expandPrefTree:" + root);
+						node = (XML)(root);
+						node.@isOpen = "itemOpen";
+					} else if (object.@isOpen == "itemOpen") {
+						trace("expandTree:" + root..application.(@uid==object.@uid));
+						node = (XML)(root..application.(@uid==object.@uid));
+						node.@isOpen = "itemOpen";
+						//inflowTreeView.expandItem(node,true,false,true);
+					}
+				}
+				inflowTreeView.openItems = root + (root..application.(@isOpen=="itemOpen"));
+				
+				//node = (XML)(root..application.(@uid=="103820"));
+				//node.appendChild(<application/>);
+				
+			}
+		}
+            
+        private function showPrefTree(event : FlexEvent):void {
+        	expandPrefTree();	
+        }
+        
+        private function expandPrefTree():void{
+			openPrefItemList = SharedObject.getLocal("openPrefTreeItemList");
+			if (inflowPrefTreeData != null) {
+				var root:XML = (XML)(inflowPrefTreeData.getItemAt(0,0));
+				var node:XML;
+				for each (var object:XML in openPrefItemList.data.openItems) {
+					if (object.name() == "root") {
+						trace("expandPrefTree:" + root);
+						node = (XML)(root);
+						node.@isOpen = "itemOpen";
+					} else if (object.@isOpen == "itemOpen") {
+						//if (root..application.(@uid==object.@uid).length > 0) {
+							trace("expandPrefTree:" + root..application.(@uid==object.@uid));
+							node = (XML)(root..application.(@uid==object.@uid));
+							node.@isOpen = "itemOpen";
+							//inflowTreeView.expandItem(node,true,false,true);
+						//}
+					}
+				}
+				if (inflowPrefTreeView != null) {
+					inflowPrefTreeView.openItems = root + (root..application.(@isOpen=="itemOpen"));
+				}
+			}
+		}
+
+		private function expandRecentTree():void {
+
+			openRecentItemList = SharedObject.getLocal("openRecentTreeItemList");
+			if (recentTaskTree != null) {
+				var root:XML = (XML)(recentTaskTree.getItemAt(0,0));
+				var node:XML;
+				for each (var object:XML in openRecentItemList.data.openItems) {
+					if (object.name() == "root") {
+						trace("expandRecentTree:" + root);
+						node = (XML)(root);
+						node.@isOpen = "itemOpen";
+					} else if (object.@isOpen == "itemOpen") {
+						if (root..application.(@uid==object.@uid) != null) {
+							trace("expandRecentTree:" + root..application.(@uid==object.@uid));
+							node = (XML)(root..application.(@uid==object.@uid));
+							node.@isOpen = "itemOpen";
+						}
+					}
+				}
+				if (recentTasks != null) {
+					//inflowPrefTreeView.openItems = root + (root..application.(@isOpen=="itemOpen"));
+					recentTasks.openItems = root + root..application.(@isOpen=="itemOpen");
+				}
+			}
+		}
+		
+		private function showRecentTree(event : FlexEvent):void {
+			expandRecentTree();
+		}
+		
+         public function saveNodeState(event:TreeEvent):void {
+         	event.item.@isOpen=event.type;
+ 			openItemList = SharedObject.getLocal("openTreeItemList");
+			openItemList.clear();
+			openItemList.data.openItems = inflowTreeView.openItems;
+			openItemList.flush();
+         }
+         
+         public function savePrefNodeState(event:TreeEvent):void {
+        	event.item.@isOpen=event.type;
+			openItemList = SharedObject.getLocal("openPrefTreeItemList");
+			openItemList.clear();
+			openItemList.data.openItems = inflowPrefTreeView.openItems;
+			openItemList.flush();
+         }
+         
+         public function saveRecentNodeState(event:TreeEvent):void {
+         	event.item.@isOpen=event.type;
+			openItemList = SharedObject.getLocal("openRecentTreeItemList");
+			openItemList.clear();
+			openItemList.data.openItems = recentTasks.openItems;
+			openItemList.flush();
+         }
+         
+		public function sendNode(data:Object):void {
+			var node:XML = (data as XML);
+			if (inflowPrefTreeData != null) {
+				var root:XML = (XML)(inflowPrefTreeData.getItemAt(0,0));
+				root.appendChild(node);
+			}
+		}
+		
+		private function initCredentials():void {
+			var storedValue:ByteArray = EncryptedLocalStore.getItem("username");
+			if (storedValue == null) {
+				//Alert.show("No credential stored");
+			}  else {
+				//Alert.show("Credential stored");
+				username = EncryptedLocalStore.getItem("username").toString();
+				password = EncryptedLocalStore.getItem("password").toString();
+        		var encoder:Base64Encoder = new mx.utils.Base64Encoder();
+        		encoder.insertNewLines = false; // see below for why you need to do this
+        		encoder.encode(username+":"+password);
+				trace(encoder.toString());
+				
+				url1= "http://appli.pulsar.be/inFlowTracerPlus-rest/tree/";
+				inflowTree.url = url1;
+       			inflowTree.headers = {"Authorization":"Basic " + encoder.toString()};                                                
+				url2="http://appli.pulsar.be/inFlowTracerPlus-rest/types/perf/";
+				inflowTypes.url=url2;
+       			inflowTypes.headers = {"Authorization":"Basic " + encoder.toString()};                                                
+				url3="http://appli.pulsar.be/inFlowTracerPlus-rest/perfs2/";
+				inflowUploader.url = url3;
+				
+	    		inflowUploader.setRemoteCredentials(username, password);
+    			inflowUploader.send();
+
+  			}
+		}
+		
+		private function resetCredentialsClicked(event:MouseEvent):void {
+				var str:String;
+				str = usernameInput.text;
+				var bytes:ByteArray;
+				bytes = new ByteArray();
+				bytes.writeUTFBytes(str);
+				EncryptedLocalStore.setItem("username", bytes);
+				str = passwordInput.text;
+				bytes = new ByteArray();
+				bytes.writeUTFBytes(str);
+				EncryptedLocalStore.setItem("password", bytes);
+		}
+		
+        private var displayDate: Date;
+        
+        private function previousDay():void
+        {
+         	saveData();
+			changeDisplayedDay(false);
+        }
+        
+        private function nextDay():void
+        {
+        	changeDisplayedDay(true);
+        }
+        
+        private function displayToday():void
+        {
+        	displayDate = new Date();
+        	display();	
+        }
+        
+        private function displaySelectedDate():void
+        {
+        	displayDate = dtDateToDisplay.selectedDate;
+        	displayDate.setHours(7,0,0,0);
+        	display();	
+        }
+        
+        private function changeDisplayedDay(forward: Boolean):void
+        {
+        	var increment: int;
+        	if (forward) {
+        		increment = 24*3600*1000;
+        	} else {
+        		increment = -24*3600*1000;
+        	}
+        	displayDate.setMilliseconds(displayDate.getMilliseconds() + increment);
+       		displayDate.setHours(7, 0, 0, 0);
+         	dtDateToDisplay.selectedDate = displayDate;
+        	display();
+        }
+        
+        private function display():void
+        {
+       		loadPerf(displayDate);
+        	setClockDisplay(displayDate);
+        	if (isToday(displayDate)) {
+        		newTaskBtn.enabled = true;
+        		startTimerBtn.enabled = true;
+         		todayBtn.enabled = false;
+         		insertTaskAboveBtn.visible = true; //false;
+         		insertTaskBelowBtn.visible = true; //false;
+        		btnSetTakeUp.enabled=false;
+        		//btnSetTakeDown.enabled=false;
+        		txtDuration.enabled=false;
+        		grid.selectedIndex = 0;
+         		currentTask = (XML)(grid.selectedItem);
+       		} else {
+        		newTaskBtn.enabled = false;
+        		//startTimerBtn.enabled = false;
+        		todayBtn.enabled = true;
+         		insertTaskAboveBtn.visible = true;
+        		insertTaskBelowBtn.visible = true;
+        		btnSetTakeUp.enabled=true;
+        		//btnSetTakeDown.enabled=true;
+        		txtDuration.enabled=true;
+        	}	
+         }
+        
+        private function prepareClockTimer():void {
+	        // creates a Timer that fires an event once per minute
+	        ticker = new Timer(1000*60); 
+	    
+	        // designates the onTick() method to handle Timer events
+	        ticker.addEventListener(TimerEvent.TIMER, onTick);
+	
+	        // starts the clock ticking
+	        ticker.start();
+	        displayDate = new Date();
+	        setClockDisplay(displayDate);
+       }
+        
+	    public function onTick(event:TimerEvent):void 
+	    {
+	        // updates the clock display
+			setClockDisplay(new Date());
+			// updates the timer display
+			setDurationDisplay();
+			trace(new Date().getTime());
+			saveData();
+			trace(new Date().getTime());
+	    }
+
+		private function setClockDisplay(date:Date):void {
+			clock.text = prettyTimeFormatter.format(date);
+			dateSelector.text = prettyDayFormatter.format(displayDate);	
+		}
+		
+		private function setDurationDisplay():void {
+			currentDuration.text = durationFormatter.format(calculateDuration(dateFormatter.format(new Date()), currentTask.@start));
+			currentDuration.text = formatDuration(calculateDuration(dateFormatter.format(new Date()), currentTask.@start).toString());
+			updateDayTotal();
+		}
+		
+        private function userIdleHandler(event:Event):void {
+			trace("Idle");
+			if (!away) {
+				recordInactivity();
+			}
+		}
+			
+        private var idleThreshold: int = 600;
+        
+        private function prepareInactivityDetection():void {
+        	NativeApplication.nativeApplication.idleThreshold = idleThreshold;
+
+			NativeApplication.nativeApplication.addEventListener(Event.USER_IDLE, userIdleHandler);
+			NativeApplication.nativeApplication.addEventListener(Event.USER_PRESENT, function(event:Event):void {
+			    trace("Present");
+			    awayBtn.enabled=true;
+			    away=false;
+			    restoreWindow(event);
+			});
+        }
+        
+		private var away:Boolean = false;
+		
+		private function continueTaskAway():void {
+			awayBtn.enabled=false;
+			away=true;
+		}
+		
+		private function recordInactivity():void {
+			saveData();
+			if (currentTask.@name != pauseName && currentTask.@name != idleTime) {
+				endTask(inflowTreeView, inflowTypesView, idleTime);
+				grid.selectedIndex = 1;
+				//grid.selectedItem.@name="PC Idle";
+		        var idx:int = grid.selectedIndex+1;
+		        if (perfGrid.length <= idx) {
+		        	//grid.selectedItem.@duration = (Number(grid.selectedItem.@duration) + Number(Math.abs(10))).toString();
+			        trace("start before   : " + grid.selectedItem.@start);
+			        trace("end before       : " + grid.selectedItem.@end);
+			        grid.selectedItem.@start = dateFormatter.format(changeDate(grid.selectedItem.@start, idleThreshold/60));
+			        grid.selectedItem.@duration = calculateDuration(grid.selectedItem.@end,grid.selectedItem.@start);
+			        trace("start after    : " + grid.selectedItem.@start);
+			        trace("end after    : " + grid.selectedItem.@end);
+			        trace("duration after : " + grid.selectedItem.@duration);
+		        } else if (Number(perfGrid.getItemAt(idx).@duration) > 0) {
+		        	//grid.selectedItem.@duration = (Number(grid.selectedItem.@duration) + Number(Math.abs(10))).toString();
+			        trace("start before   : " + grid.selectedItem.@start);
+			        trace("end before       : " + grid.selectedItem.@end);
+			        grid.selectedItem.@start = dateFormatter.format(changeDate(grid.selectedItem.@start,-idleThreshold/60));
+			        //grid.selectedItem.@duration = calculateDuration(grid.selectedItem.@end,grid.selectedItem.@start);
+			        trace("start after    : " + grid.selectedItem.@start);
+			        trace("end after    : " + grid.selectedItem.@end);
+			        trace("duration after : " + grid.selectedItem.@duration);
+			        perfGrid.getItemAt(idx).@end = grid.selectedItem.@start;
+			        trace("task before, start " + perfGrid.getItemAt(idx).@start);
+			        trace("task before, end " + perfGrid.getItemAt(idx).@end);
+			        perfGrid.getItemAt(idx).@duration = calculateDuration(perfGrid.getItemAt(idx).@end, perfGrid.getItemAt(idx).@start);
+			        trace("task before, duration " + perfGrid.getItemAt(idx).@duration);
+		        }
+		 	}
+		}
+		
+        private var idleWindow:TitleWindow;
+        
+        private function showIdlePopupWindow():void {
+            // Create the TitleWindow container.
+            idleWindow = 
+            TitleWindow(PopUpManager.createPopUp(this, IdlePopupForm, false));
+
+			idleWindow.addEventListener("MergeInPrevious", wakeUp);
+			idleWindow.addEventListener("MergeInNext", wakeUp);
+			idleWindow.addEventListener("DoNotMerge", wakeUp);
+			
+           // Add title to the title bar.
+            idleWindow.title="Resume after timeout";
+
+            // Make title bar slightly transparent.
+            idleWindow.setStyle("borderAlpha", 0.9);
+
+            // Add a close button.
+            // To close the container, your must also handle the close event.
+            idleWindow.showCloseButton=true;
+            
+            PopUpManager.centerPopUp(idleWindow);
+        }
+          
+
+		//wake up after idle
+		private function wakeUp(e:Event):void
+		{
+			trace(e);
+			if (e.type == "MergeInPrevious") {
+				//idle time is continuation of previous task
+				//resume task before idle time
+				resumeTaskBeforeIdleTime();
+				//merge new task and idle time
+				grid.selectedIndex = 0;
+				takeAllDown();
+			} else if (e.type == "MergeInNext") {
+				//idle time is a new task
+				//continue idle task but need to complete data
+				
+			} else if (e.type == "DoNotMerge") {
+				//idle time is...idle time
+				//do not merge idle time => simple end if and start a new task
+				endTask(inflowTreeView, inflowTypesView, newTaskName.text);				
+			}
+			e.preventDefault();
+		}
+		
+		private function resumeTaskBeforeIdleTime():void
+		{
+			grid.selectedIndex = 1;
+			resumeTask();
+		}
+		
+		private function showIdlePopupWindow2():void
+		{
+			var options:NativeWindowInitOptions = new NativeWindowInitOptions();
+			options.systemChrome = NativeWindowSystemChrome.STANDARD;
+			options.transparent = false;
+			var newWindow:NativeWindow = new NativeWindow(options);
+			newWindow.width = 600;
+			newWindow.height = 300;
+			newWindow.alwaysInFront = true;
+			newWindow.visible = true;
+		}
+		
+	    private function loadData():void {
+//			var file:File = File.documentsDirectory.resolvePath("PersonalTimeKeeper5/Inflow3.xml");
+//			trace(file.nativePath);
+//			var fileStream:FileStream = new FileStream();
+//			fileStream.open(file, FileMode.READ);
+//			var data:XML = XML(fileStream.readUTFBytes(fileStream.bytesAvailable));
+//			var list:XMLList = new XMLList(data);
+//	        treeData = new XMLListCollection(list);
+//			fileStream.close();
+	    }
+	    
+	    
+	    private var currentPerfFile:File;
+
+	    private function loadPerf(date:Date):void {
+			var today:String = dayFormatter.format(date);
+			currentPerfFile = File.documentsDirectory.resolvePath("PersonalTimeKeeper5/InflowPerf"+today+".xml");
+			if (currentPerfFile.exists) {
+				var fileStream:FileStream = new FileStream();
+				fileStream.open(currentPerfFile, FileMode.READ);
+				var data:XML = XML(fileStream.readUTFBytes(fileStream.bytesAvailable));
+				var week:XMLList = data.children();
+		        perfGrid = new XMLListCollection(week);
+				fileStream.close();
+				if (!isDispayDateToday(date)) {
+					cleanupPerfFile();
+				}
+			} else {
+				perfGrid = new XMLListCollection();
+			}
+			updateDayTotal();
+	    }
+	    
+	    private function cleanupPerfFile():void {
+	    	if (perfGrid.length > 0) {
+		    	if (perfGrid.getItemAt(0).@end == "") {
+		    		finishLastTask();
+	    			//insertFinalBuffer();
+	    		}
+	    	}
+	    }
+	    
+	    private function finishLastTask():void {
+	    	perfGrid.getItemAt(0).@end = perfGrid.getItemAt(0).@start;
+	    	perfGrid.getItemAt(0).@duration = "0";    	
+	    }
+	    
+	    private function insertFinalBuffer():void {
+	            var newNode:XML = <perf/>;
+	            newNode.@start = perfGrid.getItemAt(0).@end;
+	            newNode.@end = newNode.@start.substr(0,11) + "23:59";
+	            newNode.@duration = calculateDuration(newNode.@end, newNode.@start);
+	            newNode.@description = "end of the day buffer";
+	            newNode.@task = UNDEFINED;
+	            newNode.@appId = "";
+	            newNode.@status = "";
+	            descriptionInput.text = "end of the day buffer";
+         		perfGrid.addItemAt(newNode, 0);
+	    }
+	    
+	    private var recentTasksFile:File;
+	    private var recentList:XMLList;
+	    private var recent:XML;
+	    private var recentTasks2File:File;
+	    private var recent2List:XMLList;
+	    private var recent2:XML;
+	    
+	    private function loadRecentTaskList():void {
+			recentTasksFile = File.documentsDirectory.resolvePath("PersonalTimeKeeper5/InflowRecentTasks.xml");
+			if (recentTasksFile.exists) {
+				var fileStream:FileStream = new FileStream();
+				fileStream.open(recentTasksFile, FileMode.READ);
+				var data:XML = XML(fileStream.readUTFBytes(fileStream.bytesAvailable));
+				recent=data;
+				var tasks:XMLList = data.children();
+				recentList=tasks;
+		        recentTaskList = new XMLListCollection(tasks);
+				fileStream.close();
+			} else {
+				recentTaskList = new XMLListCollection();
+			}
+	    }
+
+	    private function loadRecentTaskTree():void {
+			recentTasks2File = File.documentsDirectory.resolvePath("PersonalTimeKeeper5/InflowTree.xml");
+
+			if (recentTasks2File.exists) {
+				var fileStream:FileStream = new FileStream();
+				fileStream.open(recentTasks2File, FileMode.READ);
+				var data:XML = XML(fileStream.readUTFBytes(fileStream.bytesAvailable));
+				recent=data;
+				//var tasks:XMLList = data.children();
+				//recent2List=tasks;
+		        //recentTaskTree = new XMLListCollection(tasks);
+		        recentTaskTree = new XMLListCollection(new XMLList(data));
+				fileStream.close();
+			} else {
+				recentTaskTree = new XMLListCollection();
+			}
+			completeRecentTaskTree();
+	    }
+	    
+	    private function completeRecentTaskTree():void {
+	    	//TODO change this code to loop on project tree rather than on recent tasks list
+       		var projects:XML  = recentTaskTree.source[0];
+       		if (projects != null) {
+				for each (var task:XML in recentTaskList) {
+					if (task.@appId != "") {
+		            	var proj:XMLList = projects..application.(@id==task.@appId);
+		            	var obj:XMLList = proj.perf.(@typeId==task.@typeId && @task==task.@task && @path==task.@path && @name==task.@name);
+		            	proj.@isOpen="itemOpen";
+		            	task.@isVisible="show";
+		            	if (obj.length() == 0 && proj.length() > 0) {
+			            	proj.appendChild(task);
+			            }
+			            var p:XML = task.parent();				
+						while( p )
+						{
+							p.@isVisible = "show";
+							p = p.parent();
+						}
+					}
+				}
+	       	}
+	    }
+	    
+	    //private var configFile:File;
+	    private var xmlConfig:XMLConfig;
+	    
+	    
+	    private function loadConfig():void {
+/*	    	var obj:XMLConfig = new XMLConfig();
+	    	var xml:XML = new FleXMLer().serialize(obj);
+	    	
+		    var newXMLStr:String = xml.toXMLString(); //"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<list>\n" + perfGrid.toXMLString() + "\n</list>";
+		    var fs:FileStream = new FileStream();
+
+			configFile = File.documentsDirectory.resolvePath("PersonalTimeKeeper5/config.xml");
+
+		    fs.open(configFile, FileMode.WRITE);
+		    fs.writeUTFBytes(newXMLStr);
+		    fs.close();
+	    	
+			if (configFile.exists) {
+				var fileStream:FileStream = new FileStream();
+				fileStream.open(configFile, FileMode.READ);
+				var data:XML = XML(fileStream.readUTFBytes(fileStream.bytesAvailable));
+	    		xmlConfig = new FleXMLer().deserialize(data, XMLConfig) as XMLConfig;
+				youTrackUploader.url = xmlConfig.youtrackURL;
+				youTrackUploader.rootURL = youTrackUploader.url;
+				youTrackLogin.url = xmlConfig.youtrackURL + '/user/login';
+				fileStream.close();
+			} else {
+				xmlConfig = new XMLConfig();
+			}	    	
+*/	    }
+	    
+	    public var prefTreeFile:File;
+	    private var prefTreeList:XMLList;
+	    private var prefTree:XML;
+	    
+	    private function loadPrefTreeView():void {
+			prefTreeFile = File.documentsDirectory.resolvePath("PersonalTimeKeeper5/InflowPrefTree.xml");
+			if (prefTreeFile.exists) {
+				var fileStream:FileStream = new FileStream();
+				fileStream.open(prefTreeFile, FileMode.READ);
+				var data:XML = XML(fileStream.readUTFBytes(fileStream.bytesAvailable));
+				prefTree=data;
+				var nodes:XMLList = new XMLList(data); //.children();
+				prefTreeList=nodes;
+		        inflowPrefTreeData = new XMLListCollection(nodes);
+				fileStream.close();
+			} else {
+				inflowPrefTreeData = new XMLListCollection();
+			}
+	    }
+		private function padding(cnt:int):String {
+			var s:String = "";
+			for (var i:int = 1;i<=cnt;i++) {
+				s += "---";
+			}
+			return s;
+		}
+		
+		public function weekTotal(data:Object):String {
+			var total:int = Number(data.@Monday) + Number(data.@Tuesday) + Number(data.@Wednesday) + Number(data.@Thursday) + Number(data.@Friday);
+			return total.toString();
+		}
+		
+		private function minimizing(displayStateEvent:NativeWindowDisplayStateEvent):void {
+ 			//Do we have an minimize action?
+ 			//The afterDisplayState hasn't happened yet, but only describes the state the window will go to,
+ 			//so we can prevent it!
+ 			if(displayStateEvent.afterDisplayState == NativeWindowDisplayState.MINIMIZED) {
+ 				//Prevent the windowedapplication minimize action from happening and implement our own minimize
+ 				//The reason the windowedapplication minimize action is caught, is that if active we're not able to
+ 				//undock the application back neatly. The application doesn't become visible directly, but only after clicking //on the taskbars application link. (Not sure yet what happens exactly with standard minimize)
+ 				displayStateEvent.preventDefault();
+  
+				//Dock (our own minimize)
+				SysTrayApp();
+			 }
+ 		}
+  		
+		
+		private function doTrayClick(event:Event):void {
+			restoreWindow(event);
+		}
+		
+		private function restoreWindow(event:Event):void {
+					stage.nativeWindow.visible=true;
+					stage.nativeWindow.orderToFront();
+					stage.nativeWindow.restore();
+				}
+				
+		public var systray:SystemTrayIcon;
+		
+		public function SysTrayApp():void{
+            NativeApplication.nativeApplication.autoExit = false;
+            var icon:Loader = new Loader();
+            var iconMenu:NativeMenu = new NativeMenu();
+			var restoreCommand:NativeMenuItem = iconMenu.addItem(new NativeMenuItem("Restore"));
+			restoreCommand.addEventListener(Event.SELECT, restoreWindow);
+
+			iconMenu.addItem(new NativeMenuItem("", true));
+			
+			var newTaskCommand:NativeMenuItem = iconMenu.addItem(new NativeMenuItem("New task"));
+			newTaskCommand.addEventListener(Event.SELECT, function(event:Event):void {
+					endTask(inflowTreeView, inflowTypesView, "");
+				});
+
+			iconMenu.addItem(new NativeMenuItem("", true));
+
+			//buildMenu(iconMenu, inflowTreeData.children(), 0);
+
+			iconMenu.addItem(new NativeMenuItem("", true));
+
+            var exitCommand:NativeMenuItem = iconMenu.addItem(new NativeMenuItem("Exit"));
+                exitCommand.addEventListener(Event.SELECT, function(event:Event):void {
+                    endDay();
+                    NativeApplication.nativeApplication.icon.bitmaps = [];
+                    NativeApplication.nativeApplication.exit();					  
+                });
+
+				
+            if (NativeApplication.supportsSystemTrayIcon) {
+                NativeApplication.nativeApplication.autoExit = false;
+                icon.contentLoaderInfo.addEventListener(Event.COMPLETE, iconLoadComplete);
+                icon.addEventListener(MouseEvent.CLICK, restoreWindow);
+                icon.load(new URLRequest("icons/contam-edit.gif"));
+                
+                //var systray:SystemTrayIcon = 
+                systray = 
+                    NativeApplication.nativeApplication.icon as SystemTrayIcon;
+                systray.tooltip = "AIR application";
+                systray.menu = iconMenu;
+				systray.addEventListener(MouseEvent.CLICK, doTrayClick );		
+            }
+
+            if (NativeApplication.supportsDockIcon){
+                icon.contentLoaderInfo.addEventListener(Event.COMPLETE,iconLoadComplete);
+                icon.load(new URLRequest("icons/contam-edit.gif"));
+                var dock:DockIcon = NativeApplication.nativeApplication.icon as DockIcon; 
+                dock.menu = iconMenu;
+            }
+            stage.nativeWindow.visible=false;
+        }
+        
+        private function iconLoadComplete(event:Event):void
+        {
+            NativeApplication.nativeApplication.icon.bitmaps =
+                [event.target.content.bitmapData];
+        }
+
+
+		private function closingApplication(evt:Event):void {
+			endDay();
+//			//Don't close, so prevent the event from happening 
+//			evt.preventDefault();
+			       
+////			//Check what the user really want's to do
+////			//Alert.buttonWidth = 110; 
+////			Alert.yesLabel = "Close";
+////			Alert.noLabel = "Minimize";
+////			Alert.show("Close or minimize?", "Close?", 3, this, alertCloseHandler);
+//			SysTrayApp();
+		}
+
+		private function alertCloseHandler(event:CloseEvent):void {
+	    	if (event.detail==Alert.YES) {
+	      		endDay();
+	            NativeApplication.nativeApplication.icon.bitmaps = [];
+	         	stage.nativeWindow.close();
+	      	} else {
+	      		SysTrayApp();
+	      	}
+	   	}
+	   	
+        private function closePgm():void {
+       		endDay();	
+        }
+        
+		private function startDay():void
+		{
+			cleanUp();
+			//startTimer(inflowTreeView, inflowTypesView, newTaskName.text);	
+			startTimer(inflowTreeView, inflowTypesView, "");	
+			//endTask(inflowTreeView, inflowTypesView, newTaskName.text);	
+		}
+		
+        private function cleanUp():void
+        {
+            if (perfGrid == null) {
+            	perfGrid = new XMLListCollection();
+            }
+            // end any pending task (incompatible with code above)
+            if (perfGrid.length > 0) {
+	        	if (perfGrid.getItemAt(0).@end == "") {
+		            perfGrid.getItemAt(0).@end = dateFormatter.format(new Date());
+	    	        perfGrid.getItemAt(0).@duration = calculateDuration(perfGrid.getItemAt(0).@end, perfGrid.getItemAt(0).@start);
+	    	        saveData();
+	        	}
+            }
+/*            if (perfGrid.length == 0) {
+            	//TODO: create a dummy task starting today at 00:00
+	            var newNode:XML = <perf/>;
+	            var today00: Date = new Date();
+	            newNode.@start = startDayDateFormatter.format(new Date());
+	            newNode.@description = "";
+	            //newNode.@name = taskName;
+	            newNode.@task = UNDEFINED;
+	            newNode.@end = "";
+	            newNode.@appId = "";
+	            newNode.@status = "";
+	            descriptionInput.text = "";
+         		perfGrid.addItemAt(newNode, 0);
+         		//currentTask = newNode;
+            }
+            currentTask = perfGrid.getItemAt(0) as XML;
+*/        }
+        
+        private var pauseName:String = 'Pause';
+        private var idleTime:String = 'Idle time';
+        
+        public function pauseTask():void {
+        	endTask(inflowTreeView, inflowTypesView, pauseName);
+        	currentTask.@name = pauseName;
+        }
+        
+        private function startNewTaskClick(event:MouseEvent):void {
+        	if (event.type == MouseEvent.CLICK) {
+ 				if (isToday(displayDate))
+ 				{
+       				endTask(inflowPrefTreeView, inflowPrefTypesView, "");
+       				grid.selectedIndex = 0;
+     			} else {
+					if (perfGrid.length == 0)
+					{
+						insertFirstTask();
+					}
+    			}
+        	}
+        }
+        
+		public function buildNodePath(node:XML):String {
+        	var parentArray:Array = new Array();
+        	if (node != null) {
+				var obj:XML = node;
+				while( obj.parent() )
+				{
+	   				try
+	   				{
+	         			parentArray.push( obj.@name);
+	         			obj = obj.parent();
+	    			}
+	    			catch( e:Error )
+	    			{
+	         			break;
+	     			}	
+				}
+				var regExp:RegExp = new RegExp(",","g");
+				var path:String = parentArray.reverse().toString().replace(regExp,'/');
+				return path;
+        	} else {
+	       		return null;
+        	}
+		}
+		
+        private function endDay():void
+        {
+        	stopTimer();
+        	saveData();
+        }
+        
+        private function updateDayTotal():void {
+			today.text = formatDuration(dayTotal().toString());
+			if (systray != null) {
+				systray.tooltip = today.text;
+			}
+        }
+        
+		public function suspendTask():void
+		{
+			
+		}
+		
+		private function suspendTimer():void
+		{
+			
+		}
+		
+		private function deleteTask():void {
+			trace(grid.selectedItem);
+			if (grid.selectedIndex > 0) {
+				if (Number(grid.selectedItem.@duration) <= 1) {
+					perfGrid.removeItemAt(grid.selectedIndex);
+					saveData();
+				}
+			} else {
+				perfGrid.removeItemAt(0);
+				perfGrid.getItemAt(0).@end="";
+				perfGrid.getItemAt(0).@duration=0;
+				currentTask = perfGrid.getItemAt(0) as XML;
+				saveData();
+			}
+		}
+		
+		private function deleteTask2():void {
+//			trace(grid0.selectedItem);
+//			taskGrid.removeItemAt(grid0.selectedIndex);
+		}
+		
+		private function resumeTask():void {
+			var taskToResume:XML = grid.selectedItem as XML;
+			if (!isToday(displayDate)) {			
+				displayToday();
+			}
+			endTask(inflowTreeView, inflowTypesView, taskToResume.@name);
+			currentTask.@task = taskToResume.@task;
+			currentTask.@path = taskToResume.@path;
+			//currentTask.@state = taskToResume.@state;
+			if (currentTask.@task == UNDEFINED) {
+				currentTask.@state = stateUndefined;
+			} else {
+				currentTask.@state = stateDefined;
+			}
+			currentTask.@appId = taskToResume.@appId;
+			currentTask.@typeId = taskToResume.@typeId;
+			currentTask.@type = taskToResume.@type;
+			currentTask.@name = taskToResume.@name;
+			currentTask.@description = taskToResume.@description;
+			currentTask.@ytCode = taskToResume.@ytCode;
+			taskToResume = null;
+			saveData();
+		}
+		
+		public function resumeClicked(event:MouseEvent):void {
+			resumeTask();
+			event.preventDefault();
+		}
+		
+		public function isDispayDateToday(date:Date): Boolean {
+			return isToday(date);
+		}
+
+		public function takeOneUpClicked(event:FlexEvent):void {
+			var r:XML = event.target.parent.data as XML;
+			var row : XML;
+			var pos: int;
+			for (var index:int=0;index<perfGrid.length; index= index +1)
+			{
+				row = perfGrid.getItemAt(index) as XML;
+				if (row == r) {
+					pos = index;
+					index=9999;
+				}
+			}
+			grid.selectedIndex = pos;
+			
+			if (isAltKeyPressed) {
+				if (grid.selectedIndex > 0) {
+					moveOneUp( perfGrid.getItemAt(grid.selectedIndex-1) as XML, grid.selectedItem as XML);
+				} else {
+					moveOneUp( null, grid.selectedItem as XML);
+				}
+			} else {
+				if (grid.selectedIndex > 0) {
+					moveOneDown(perfGrid.getItemAt(grid.selectedIndex-1) as XML, grid.selectedItem as XML);
+				} else {
+					moveOneDown(null, grid.selectedItem as XML);
+				}
+			}
+			event.preventDefault();
+   			updateDayTotal();
+   			saveData();
+   			return;
+		}
+		
+		public function takeAllUpClicked(event:MouseEvent):void {
+			var target:XML = grid.selectedItem as XML;
+			grid.selectedIndex = grid.selectedIndex-1;
+			var source:XML = grid.selectedItem as XML;
+			if (source.@end != "") {
+				source.@start = source.@end;
+			}
+			target.@end = source.@start;
+            target.@duration = calculateDuration(target.@end, target.@start);
+			source.@duration=0;
+			event.preventDefault();
+   					saveData();
+		}
+		
+		private var isAltKeyPressed: Boolean;
+		
+		public function captureSpecialKeys(event:KeyboardEvent):void {
+			isAltKeyPressed = event.altKey;		
+		}
+		
+		public function moveOneDown(aboveRow:XML, belowRow:XML): void {
+			if (grid.selectedIndex >= 0 && (aboveRow != null && (aboveRow.@duration >= 1 || aboveRow.@end == ""))) {
+				aboveRow.@start = dateFormatter.format(changeDate(aboveRow.@start, 1));
+				if (belowRow != null) {
+					belowRow.@end = aboveRow.@start;
+					belowRow.@duration = calculateDuration(belowRow.@end, belowRow.@start);
+				}
+				aboveRow.@duration = calculateDuration(aboveRow.@end, aboveRow.@start);
+			} else if (grid.selectedIndex == 0) {
+				belowRow.@end = dateFormatter.format(changeDate(belowRow.@end, 1));
+				belowRow.@duration = calculateDuration(belowRow.@end, belowRow.@start);
+			}
+			setDurationDisplay();
+		}
+		
+		public function moveOneUp(aboveRow:XML, belowRow:XML): void {
+			if (grid.selectedIndex >= 0 && (belowRow == null || belowRow.@duration >= 1)) {
+				aboveRow.@start = dateFormatter.format(changeDate(aboveRow.@start, -1));
+				if (belowRow != null) {
+					belowRow.@end = aboveRow.@start;
+					belowRow.@duration = calculateDuration(belowRow.@end, belowRow.@start);
+				}
+				aboveRow.@duration = calculateDuration(aboveRow.@end, aboveRow.@start);
+			} 
+			setDurationDisplay();
+		}
+		
+		public function takeOneDownClicked(event:FlexEvent):void {
+			var r:XML = event.target.parent.data as XML;
+			var row : XML;
+			var pos: int;
+			for (var index:int=0;index<perfGrid.length; index= index +1)
+			{
+				row = perfGrid.getItemAt(index) as XML;
+				if (row == r) {
+					pos = index;
+					index=9999;
+				}
+			}
+			grid.selectedIndex = pos;
+			if (isAltKeyPressed) {
+				if (grid.selectedIndex < (perfGrid.length-1)) {
+					moveOneDown(grid.selectedItem as XML, perfGrid.getItemAt(grid.selectedIndex+1) as XML);
+				} else {
+					moveOneDown(grid.selectedItem as XML, null);					
+				}
+			} else {
+				if (grid.selectedIndex < (perfGrid.length-1)) {
+					moveOneUp(grid.selectedItem as XML, perfGrid.getItemAt(grid.selectedIndex+1) as XML);
+				} else {
+					moveOneUp(grid.selectedItem as XML, null);					
+				}
+			}
+			event.preventDefault();
+   			updateDayTotal();
+   			saveData();
+   			return;
+		}
+		
+		public function takeAllDownClicked(event:MouseEvent):void {
+			takeAllDown();
+			event.preventDefault();
+		}
+		
+		private function takeAllDown():void {
+			var target:XML = grid.selectedItem as XML;
+			grid.selectedIndex = grid.selectedIndex+1;
+			var source:XML = grid.selectedItem as XML;
+			source.@end = source.@start;
+			target.@start = source.@start;
+			if (target.@end != "") {
+	            target.@duration = calculateDuration(target.@end, target.@start);			
+			}
+			source.@duration=0;
+   			saveData();
+		}
+		
+		//merge current task into task above
+		public function mergeUpClicked(event:MouseEvent):void {
+			var taskToMerge:XML = grid.selectedItem as XML;
+			grid.selectedIndex = grid.selectedIndex-1;
+			var targetTask:XML = grid.selectedItem as XML;
+			targetTask.@start=taskToMerge.@start;
+            targetTask.@duration = calculateDuration(targetTask.@end, targetTask.@start);
+			taskToMerge.@end=taskToMerge.@start;
+			taskToMerge.@duration=0;
+			event.preventDefault();
+		}	
+		
+		public function mergeDownClicked(event:MouseEvent):void {
+			var taskToMerge:XML = grid.selectedItem as XML;
+			grid.selectedIndex = grid.selectedIndex+1;
+			var targetTask:XML = grid.selectedItem as XML;
+			targetTask.@end=taskToMerge.@end;
+            targetTask.@duration = calculateDuration(targetTask.@end, targetTask.@start);
+			taskToMerge.@start=taskToMerge.@end;
+			taskToMerge.@duration=0;
+			event.preventDefault();
+		}	
+		
+		public function deleteClicked(event:MouseEvent):void {
+			deleteTask();
+			event.preventDefault();
+		} 
+		
+		public function deleteTaskClicked(event:MouseEvent):void {
+			deleteTask2();
+		} 
+
+	    
+	    private function calculateDuration(end:String, start:String):Number {
+	    	trace("calculateDuration");
+	    	if (end == "") {
+	    		trace("end is unknow, duration is 0.0");
+	    		return 0.0;
+	    	} else {
+				var startDate:Date = new Date(start);
+		    	trace(dateFormatter.format(startDate));
+				var endDate:Date = new Date(end);
+				trace(dateFormatter.format(endDate));
+				var duration:Number = (endDate.getTime() - startDate.getTime())/1000/60; //minutes
+				if (duration < 0) {
+					//Alert.show("end date before start date");
+					endDate = startDate;
+				}
+				if (duration < 1) {
+					duration = 0;
+				}
+				trace(duration);
+				return duration;
+	    	}
+		}
+		
+		private function recalculateStartdate(end:String, duration:Number):Date {
+			trace(duration);
+			trace(end);		
+			var endDate:Date = new Date(end);
+			var startDate:Date = new Date();
+			startDate.setTime(endDate.getTime() - (duration*1000*60)); //minutes
+			trace(dateFormatter.format(startDate));
+			trace(dateFormatter.format(endDate));
+			trace(duration);
+			return startDate; 
+		}	
+			
+		private function recalculateEnddate(start:String, duration:Number):Date {
+			trace("duration" + duration);
+			trace("start " + start);		
+			var endDate:Date = new Date();
+			var startDate:Date = new Date(start);
+			endDate.setTime(startDate.getTime() + (duration*1000*60)); //minutes
+			trace("start " + dateFormatter.format(startDate));
+			trace("new end " +dateFormatter.format(endDate));
+//			trace("duration" + duration);
+			return endDate; 
+		}	
+		
+        private function changeDate(date:String, change:Number):Date {
+			trace("change" + change);
+			trace("date " + date);		
+			var dateToChange:Date = new Date(date);
+			var changedDate:Date = new Date();
+			changedDate.setTime(dateToChange.getTime() + (change*1000*60)); //minutes
+			trace("changed date " + dateFormatter.format(dateToChange));
+			trace("now          " + new Date().getTime());
+			trace("changedDate  " + changedDate.getTime());
+			if (changedDate.getTime() <= new Date().getTime()) {
+				return changedDate
+			} else {
+				return dateToChange;
+			}
+        }
+        
+        public function clickHandler(event:ItemClickEvent):void {
+//                if (event.item == "Suspend") {
+//                	suspendTask();
+//                }
+//                else if (event.item == "End") {
+//                	endTask();	
+//                }    
+        }
+        
+        private function nextTaskButtonClick(event:MouseEvent):void {
+//        	if (event.type == MouseEvent.CLICK) {
+//        		endTask();
+//        	} 	
+        }
+        
+        private function setPathClick(event:MouseEvent):void {
+/*        	if (event.type == MouseEvent.CLICK) {
+        		if (inflowAppPath.text != "") {
+					selectFromPath(inflowTreeView, inflowAppPath.text);        		
+        		}
+        	}
+*/        }
+        
+        private function selectFromPath(treeView:Tree, path:String):void {
+           	//get all projects
+           	var projects:XML  = inflowTreeData.source[0];
+           	//get project at the root of the path
+           	var segmentArray:Array = path.split("/");
+			var proj:XMLList = new XMLList(projects);
+           	for (var i:int = 1;i<segmentArray.length;i++) {
+	           	proj = proj.application.(@name==segmentArray[i]);
+	           	proj.@isOpen="itemOpen";
+	        }
+           	//var idx:int = inflowTreeView.getItemIndex(proj);
+//			var root:XML = (XML)(inflowTreeData.getItemAt(0,0));
+//			inflowTreeView.openItems = root + (root..application.(@isOpen=="itemOpen"));
+//			
+//
+//			projects  = inflowTreeData.source[0];
+//			proj = new XMLList(projects);
+//          	for (var i:int = 1;i<segmentArray.length;i++) {
+//	           	proj = proj.application.(@name==segmentArray[i]);
+//	        }
+            //expandTree();
+            var idx:int = inflowTreeData.getItemIndex(proj);
+            inflowTreeView.selectedItem = proj;
+            inflowTreeView.selectedIndex = idx;
+
+        }
+        
+  
+/*
+        private function startNewPrefTaskClick(event:MouseEvent):void {
+        	if (event.type == MouseEvent.CLICK) {
+        		endTask(inflowPrefTreeView, inflowPrefTypesView, newTaskName.text);
+        	}
+        }
+*/
+       
+        private function endNowDurationClick(event:MouseEvent):void {
+//        	if (event.type == MouseEvent.CLICK) {
+//        		endTask();
+//        		currentTask.@name = newTaskName.text;
+//        		var previousTask:XML = currentTask;
+//        		endTask();
+//        		
+//        	}
+        }
+        
+		public function formatDate(date:String):String {
+			return dateFormatter.format(date);
+		}
+
+		public function formatDuration(duration:String):String {
+			var hours:String = zeroPad(int((Number(duration)/60)), 2);
+			var minutes:String = zeroPad(Math.round((Number(duration)%60)), 2);
+			return hours + "h" + minutes;
+		}
+	    
+		public function zeroPad(number:int, width:int):String {
+		   var ret:String = ""+number;
+		   while( ret.length < width )
+		       ret="0" + ret;
+		   return ret;
+		}
+
+		public function shortFormatDuration(duration:String):String {
+			var hours:String = int((Number(duration)/60)).toString();
+			var minutes:String = Math.round((Number(duration)%60)).toString();
+			if (minutes.length == 1) {
+				minutes = "0" + minutes;
+			}
+			return hours + "h" + minutes;
+		}
+		
+		public function formatTime(date:String): String {
+			return prettyTimeFormatter.format(date);
+		}
+		
+	    private function saveData():void{
+		    var newXMLStr:String = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<list>\n" + perfGrid.toXMLString() + "\n</list>";
+		    var fs:FileStream = new FileStream();
+		    fs.open(currentPerfFile, FileMode.WRITE);
+		    fs.writeUTFBytes(newXMLStr);
+		    fs.close();
+		    savePerfBtn.enabled = false;
+		    saveRecentTaskList();
+		    saveTaskList();
+		}
+		
+		public function savePrefTree():void {
+		    var newXMLStr:String = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + inflowPrefTreeData.toXMLString();
+		    var fs:FileStream = new FileStream();
+		    fs.open(prefTreeFile, FileMode.WRITE);
+		    fs.writeUTFBytes(newXMLStr);
+		    fs.close();
+		}
+		
+ 	    private function saveRecentTaskList():void{
+ 	    	//var visibleRecentTaskList:XMLListCollection = recentTaskList.(@isVisible="true");
+		    var newXMLStr:String = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<list>\n" + recentTaskList.toXMLString() + "\n</list>";
+		    //recentTasksFile = File.documentsDirectory.resolvePath("PersonalTimeKeeper5/InflowFormerTasks.xml");
+		    var fs:FileStream = new FileStream();
+		    fs.open(recentTasksFile, FileMode.WRITE);
+		    fs.writeUTFBytes(newXMLStr);
+		    fs.close();
+		}
+		
+		private function purgeRecentTaskList():void {
+			//remove task no longer visible in tree view
+				
+		}
+		
+		public function displayFormerTask(item:Object):String {
+            return item.application.@name + ", " + item.type.@name; 
+        }
+        
+        [Bindable]
+         private var treeData:XMLListCollection = new XMLListCollection(); //treeList.node);
+
+            private function treeLabel(item:Object):String
+            {
+
+                var node:XML = XML(item);
+                if( node.localName() == "node" )
+
+                    return node.@title;
+                else if( node.localName() == "perf" )
+                	return node.@startDate + node.@endDate;
+                else
+                    return node.@name;
+            }
+            
+            private function selectNode(evt:ListEvent):void
+            {
+            	var node:XML = inflowTreeView.selectedItem as XML;
+            	var isOpen:Boolean = inflowTreeView.isItemOpen(node);
+	       		grid.selectedItem.@task = node.@title;
+	       		inflowTreeView.selectedItem = null;
+				updateDayTotal();
+				savePerfBtn.enabled = true;
+            }
+            
+            private function inflowNodeRightClick(evt:MouseEvent):void {
+            	trace(evt);
+            }
+                 
+            private function selectRecentTask(evt:ListEvent): void {
+//            	var s:String = "test";
+//            	s = (evt.currentTarget).selectedItem.@appId;
+//            	s = (evt.currentTarget).selectedItem.@typeId;
+            	var projects:XML  = inflowTreeData.source[0];
+            	var proj:XMLList = projects..application.(@id==(evt.currentTarget).selectedItem.@appId);
+            	var idx:int = inflowTreeView.getItemIndex(proj);
+            	inflowTreeView.selectedItem = proj;
+            	//inflowTreeView.selectedItem = null;
+            	//inflowTreeView.selectedIndex = idx;
+            	var types:XML = inflowTypesData.source[0];
+            	var typ:XMLList = types.type.(@id==(evt.currentTarget).selectedItem.@typeId);
+             	var idx2:int = inflowTypesView.getItemIndex(typ);
+             	inflowTypesView.selectedItem = typ;
+             	//inflowTypesView.selectedItem=null;
+             	//inflowTypesView.selectedIndex = idx2;
+             	newTaskName.text = (evt.currentTarget).selectedItem.@name;
+             	endTask(inflowTreeView, inflowTypesView, newTaskName.text);
+            }
+            
+            private function dayTotal():Number
+            {
+            	var dayTotal:Number = 0;
+            	for each (var node: XML in perfGrid)
+            	{
+					trace(node.@task + " " + (node.@task.indexOf("Undefined",0) > -1));
+					if (node.@task.indexOf("Undefined",0) == -1) {
+						var duration:Number = new Number(node.@duration);
+						if (duration == 0) {
+							duration = calculateDuration(dateFormatter.format(new Date()),node.@start);
+						}
+		            	dayTotal = dayTotal + duration;
+					}
+            	}
+            	return dayTotal;
+            }
+
+            private function collapseTree():void{
+//                for (var i:int = 0; i < tree.dataProvider.length; i ++){
+//                          tree.expandChildrenOf(tree.dataProvider[i], false)
+//                }
+           }
+//            private function expandTypes():void{
+//                for (var i:int = 0; i < inflowTypesView.dataProvider.length; i ++){
+//                          inflowTypesView.expandChildrenOf(inflowTypesView.dataProvider[i], true)
+// 	           }
+//                var xList:XMLList = treeData.copy()..node.(hasOwnProperty("@expanded") && @expanded == "true");
+//                inflowTypesView.openItems = xList;
+//            }
+
+           private function sliderChanged(): void
+           {
+           		grid.selectedItem.@duration = durationChange.value;
+           		trace(grid.selectedItem.@end);
+           		grid.selectedItem.@start = dateFormatter.format(recalculateStartdate(grid.selectedItem.@end, grid.selectedItem.@duration));
+        		var idx:int = grid.selectedIndex+1;
+        		perfGrid.getItemAt(idx).@end = grid.selectedItem.@start;
+        		trace(perfGrid.getItemAt(idx).@end);
+        		trace(perfGrid.getItemAt(idx).@start);
+        		perfGrid.getItemAt(idx).@duration = calculateDuration(perfGrid.getItemAt(idx).@end, perfGrid.getItemAt(idx).@start);
+        		trace(perfGrid.getItemAt(idx).@duration);
+           }
+                   
+          	public function inGridStepperChanged(event:NumericStepperEvent):void
+          	{
+          		trace(event.currentTarget.data.@start);
+          		grid.selectedItem = event.currentTarget.data;
+          		if (grid.selectedIndex >= 0) {
+	          		trace("duration before: " + grid.selectedIndex + " + " + grid.selectedItem + " + " + grid.selectedItem.@duration);
+	          		trace("stepper value  : " + event.value);
+	          		var idx:int;
+	          		event.target.value=0;
+					if (Number(event.value) == -1) {
+		        		idx = grid.selectedIndex+1;
+		        		if (perfGrid.length <= idx) {
+		        			//no row below the selected one
+			          		trace("duration after : " + grid.selectedItem.@duration);
+			           		trace("start before   : " + grid.selectedItem.@start);
+			           		trace("end before       : " + grid.selectedItem.@end);
+			           		grid.selectedItem.@start = dateFormatter.format(changeDate(grid.selectedItem.@start, -1));
+			           		grid.selectedItem.@duration = calculateDuration(grid.selectedItem.@end,grid.selectedItem.@start);
+			           		trace("start after    : " + grid.selectedItem.@start);
+			           		trace("end after    : " + grid.selectedItem.@end);
+		        		} else if (Number(perfGrid.getItemAt(idx).@duration) > 0 && grid.selectedIndex > 0) {
+		        			//
+			          		trace("duration after : " + grid.selectedItem.@duration);
+			           		trace("start before   : " + grid.selectedItem.@start);
+			           		trace("end before       : " + grid.selectedItem.@end);
+			           		grid.selectedItem.@start = dateFormatter.format(changeDate(grid.selectedItem.@start, -1));
+			           		grid.selectedItem.@duration = calculateDuration(grid.selectedItem.@end,grid.selectedItem.@start);
+			           		trace("start after    : " + grid.selectedItem.@start);
+			           		trace("end after    : " + grid.selectedItem.@end);
+			        		perfGrid.getItemAt(idx).@end = grid.selectedItem.@start;
+			        		trace("task before, start " + perfGrid.getItemAt(idx).@start);
+			        		trace("task before, end " + perfGrid.getItemAt(idx).@end);
+			        		perfGrid.getItemAt(idx).@duration = calculateDuration(perfGrid.getItemAt(idx).@end, perfGrid.getItemAt(idx).@start);
+			        		trace("task before, duration " + perfGrid.getItemAt(idx).@duration);
+		        		}  else if (Number(perfGrid.getItemAt(idx).@duration) > 0 && grid.selectedIndex == 0) {
+		        			//
+			           		trace("start before   : " + grid.selectedItem.@start);
+			           		trace("end before       : " + grid.selectedItem.@end);
+			           		grid.selectedItem.@start = dateFormatter.format(changeDate(grid.selectedItem.@start, -1));
+			           		trace("start after    : " + grid.selectedItem.@start);
+			           		trace("end after    : " + grid.selectedItem.@end);
+			        		perfGrid.getItemAt(idx).@end = grid.selectedItem.@start;
+			        		trace("task before, start " + perfGrid.getItemAt(idx).@start);
+			        		trace("task before, end " + perfGrid.getItemAt(idx).@end);
+			        		perfGrid.getItemAt(idx).@duration = calculateDuration(perfGrid.getItemAt(idx).@end, perfGrid.getItemAt(idx).@start);
+			        		trace("task before, duration " + perfGrid.getItemAt(idx).@duration);
+		        		}
+		   			} else if (Number(event.value) == 1) {
+		        		idx = grid.selectedIndex-1;
+		        		if (Number(perfGrid.getItemAt(idx).@duration) > 0) {
+		          			//grid.selectedItem.@duration = (Number(grid.selectedItem.@duration) + Number(Math.abs(event.value))).toString();
+			          		trace("duration after : " + grid.selectedItem.@duration);
+			           		trace("start before   : " + grid.selectedItem.@start);
+			           		trace("end  before      : " + grid.selectedItem.@end);
+			           		grid.selectedItem.@end = dateFormatter.format(changeDate(grid.selectedItem.@end, 1));
+			           		grid.selectedItem.@duration = calculateDuration(grid.selectedItem.@end,grid.selectedItem.@start);
+			           		trace("start after    : " + grid.selectedItem.@start);
+			           		trace("end after    : " + grid.selectedItem.@end);
+			        		perfGrid.getItemAt(idx).@start = grid.selectedItem.@end;
+			        		trace("task after, start " + perfGrid.getItemAt(idx).@start);
+			        		trace("task after, end " + perfGrid.getItemAt(idx).@end);
+			        		perfGrid.getItemAt(idx).@duration = calculateDuration(perfGrid.getItemAt(idx).@end, perfGrid.getItemAt(idx).@start);
+			        		trace("task after, duration " + perfGrid.getItemAt(idx).@duration);
+			        	}
+		   			}
+   					event.preventDefault();
+   					updateDayTotal();
+   					//saveData();
+          		}
+           }
+           private var itemindex : int;
+           
+           private function itemClicked(event:ListEvent):void
+           {
+           		itemindex = event.rowIndex;
+//				if (grid.selectedIndex == 0 ) {
+//					//durationChange.visible = false;
+//					durationChange.enabled = false;
+//				} else {
+//					//durationChange.visible = true;
+//					durationChange.enabled = true;
+//				}
+////				descriptionInput.text = grid.selectedItem.@comment;
+//				if (grid.selectedIndex > 0 && grid.selectedIndex < perfGrid.length-1) {
+//					trace("index " + grid.selectedIndex);
+//	           		durationChange.value = grid.selectedItem.@duration;
+//	           		durationChange.maximum = durationChange.value;
+//	           		trace("value " + durationChange.value);
+//	           		trace("max " + durationChange.maximum);
+//    	       		grid.selectedIndex = grid.selectedIndex +1;
+//    	       		trace("new index " + grid.selectedIndex);
+//    	       		trace("prev. duration " + grid.selectedItem.@duration);
+//   	    	   		durationChange.maximum = grid.selectedItem.@duration;
+//   	    	   		durationChange.maximum = durationChange.maximum + durationChange.value;
+//    	       		trace("max " + durationChange.maximum);
+//   	       			grid.selectedIndex = grid.selectedIndex -1;
+////   	       			sideStepper.value = durationChange.value;
+////   	       			sideStepper.maximum = durationChange.maximum;
+////   	       			sideStepper.minimum = durationChange.minimum;
+//   				}
+           }
+           
+           private function changedYTCode():void {
+				if (grid.selectedItem != null) {
+           			grid.selectedItem.@ytCode = newTaskYTCode.text;
+           		}
+           }
+           
+           private function changedTitle():void {
+				if (grid.selectedItem != null) {
+           			grid.selectedItem.@name = newTaskName.text;
+           			if (newTaskName.text != "") {
+           				grid.selectedItem.@state = stateDefined;
+           			}
+           		}
+           }
+
+           private function changedDescription():void {
+           		if (grid.selectedItem != null) {
+           			grid.selectedItem.@description = descriptionInput.text;
+           		}
+           }
+           
+           private var descriptionClipboard:String = "";
+           
+           private function copyDescription():void {
+           		descriptionClipboard = descriptionInput.text;
+           		copyBtn.enabled = false;
+           		pasteBtn.enabled = true;
+           }
+           
+           private function pasteDescription():void {
+           		descriptionInput.text = descriptionClipboard;
+           		copyBtn.enabled = true;
+           		pasteBtn.enabled = false;
+           		changedDescription();
+           }
+           
+			
+			private function resetTask():void {
+				if (grid.selectedItem != null) {
+					grid.selectedItem.@ytCode = "";
+					grid.selectedItem.@task = UNDEFINED;
+					grid.selectedItem.@state = stateUndefined;
+					grid.selectedItem.@appId = "";
+					grid.selectedItem.@name = "";
+					grid.selectedItem.@type = "";
+					grid.selectedItem.@typeId= "";
+					grid.selectedItem.@path="";
+					grid.selectedItem.@description = "";
+					updateDayTotal();
+				}
+			}
+			
+			private function sendDayPerfs(day:String):void {
+				trace("Sending perfs of " + day);
+				for each (var perf:XML in weekGrid) {
+					trace(perf.attribute(name) + " " + perf.attribute(day));
+				}
+			}
+
+		[Bindable]
+		private var inflowTreeData:XMLListCollection = new XMLListCollection();
+		
+		[Bindable]
+		private var inflowPrefTreeData:XMLListCollection = new XMLListCollection();
+
+		[Bindable]
+		public var inflowTypesData:XMLListCollection = new XMLListCollection();
+		
+		[Bindable]
+		public var inflowTodoData:XMLListCollection = new XMLListCollection();
+		
+		[Bindable]
+		public var youTrackProjectList:XMLListCollection = new XMLListCollection();
+		
+		[Bindable]
+		public var youTrackProjectTicketList:XMLListCollection = new XMLListCollection();
+		
+		[Bindable]
+		public var youTrackToDoList:XMLListCollection = new XMLListCollection();
+
+		[Bindable]
+		public var redmineIssueTreeData:XMLListCollection = new XMLListCollection();
+				
+		private function redmineIssueLoaderResultHandler(event:ResultEvent):void {
+			trace("redmineIssueLoaderResultHandler");
+			redmineIssueTreeData = new XMLListCollection(new XMLList(event.result as XML));
+//			inflowTreeData = new XMLListCollection(new XMLList(event.result as XML));
+//			for each (var node:XML in inflowTreeData) {
+//				for each (var sub:XML in node.descendants()) {
+//					sub.@uid = sub.@id;
+//					sub.@isOpen = "itemClose";
+//					sub.@isVisible="true";
+//				}
+//			}
+//			//inflowTreeView.openItems = openTreeList;
+//			saveXMLToFile(inflowTreeData, "PersonalTimeKeeper5/InflowTree.xml");			
+		}
+
+		private function redmineIssueLoaderFaultHandler(event:FaultEvent):void {
+//			Alert.show("Tree loader REST error: " + event.message);
+//			event.preventDefault();	
+			errorMsg1 = event.message.toString();
+			trace(event.statusCode);
+//			if (event.statusCode != 401) {
+//				event.preventDefault();
+//				inflowTreeData = loadLocalFile("PersonalTimeKeeper5/InflowTree.xml");
+//			}
+		}
+		
+		private function inflowTreeLoaderResultHandler(event:ResultEvent):void {
+			inflowTreeData = new XMLListCollection(new XMLList(event.result as XML));
+			for each (var node:XML in inflowTreeData) {
+				for each (var sub:XML in node.descendants()) {
+					sub.@uid = sub.@id;
+					sub.@isOpen = "itemClose";
+					sub.@isVisible="true";
+				}
+			}
+			//inflowTreeView.openItems = openTreeList;
+			saveXMLToFile(inflowTreeData, "PersonalTimeKeeper5/InflowTree.xml");
+			log += "\nInflow Tree Load Successful";	
+		}
+
+		private function inflowTreeLoaderFaultHandler(event:FaultEvent):void {
+			trace(event.statusCode);
+			if (event.statusCode != 401) {
+				log += "\nInflow Tree Load error " + event.statusCode;
+				event.preventDefault();
+				inflowTreeData = loadLocalFile("PersonalTimeKeeper5/InflowTree.xml");
+			}
+			errorMsg1 += "\nInflow Tree Load error " + event.statusCode;
+			errorMsg1 += event.message.toString();
+		}
+				
+		private function inflowUploaderResultHandler(event:ResultEvent):void {
+			event.token.perf.@inReported = stateReported;
+			if (event.token.perf.@inReported == event.token.perf.@ytReported) {
+				event.token.perf.@state = stateReported;				
+			}
+			saveData();
+			log += "\nInflow upload successful";
+			log += "\nInflow Reported task:" + event.token.perf.@task + " desc:" + event.token.perf.@description + " start:" + event.token.perf.@start + " app:" + event.token.perf.@appId + " type:" + event.token.perf.@typeId;
+			errorMsg1 += "\nInflow upload successful";
+			errorMsg1 += "\nInflow Reported task:" + event.token.perf.@task + " desc:" + event.token.perf.@description + " start:" + event.token.perf.@start + " app:" + event.token.perf.@appId + " type:" + event.token.perf.@typeId;
+		}
+
+		private function inflowUploaderFaultHandler(event:FaultEvent):void {
+			//if (event.statusCode != 401) {
+				//Alert.show("Inflow Uploader REST error");
+				log += "\nInflow Uploader REST error " + event.statusCode;
+			//}	
+			errorMsg1 += "\nInflow Uploader REST error " + event.statusCode;
+			errorMsg1 += event.message.toString();
+			event.token.perf.@inReported = stateFailed;
+			//event.token.perf.@state = stateFailed;
+		}
+		
+		[Bindable]
+		private var errorMsg1:String;
+		
+		private function youTrackUploaderResultHandler(event:ResultEvent):void {
+			event.token.perf.@ytReported = stateReported;
+			if (event.token.perf.@inReported == event.token.perf.@ytReported) {
+				event.token.perf.@state = stateReported;				
+			}
+			saveData();
+			errorMsg1 += "\nYouTrack upload successful";
+			errorMsg1 += "\nYouTrack Reported task:" + event.token.perf.@task + " desc:" + event.token.perf.@description + " start:" + event.token.perf.@start + " app:" + event.token.perf.@appId + " type:" + event.token.perf.@typeId;
+			log += "\nYouTrack upload successful";
+			log += "\nYouTrack Reported task:" + event.token.perf.@task + " desc:" + event.token.perf.@description + " start:" + event.token.perf.@start + " app:" + event.token.perf.@appId + " type:" + event.token.perf.@typeId;
+		}
+
+		private function youTrackUploaderFaultHandler(event:FaultEvent):void {
+//			if (event.statusCode != 401) {
+				//errorMsg2.text += "\nYouTrack Uploader REST error " + event.statusCode;
+//			}	
+			errorMsg1 += "\nYouTrack Uploader REST error " + event.statusCode;
+			errorMsg1 += event.message.toString();
+			event.token.perf.@ytReported = stateFailed;
+			//event.token.perf.@state = stateFailed;
+		}
+		
+		private function youTrackLoginResultHandler(event:ResultEvent):void {
+			if (perfTemp != null) {
+				var params : Object = new Object();
+				if (Number(perfTemp.@duration)>0) {
+					errorMsg1 += "\nYouTrack Uploader Login successful, starting upload";
+					//errorMsg2.text += "\nYouTrack Uploader Login successful, starting upload";
+					var date:String = perfTemp.@start;
+					date = date.substr(0,10).replace(/\//g,'-');
+					params.command = 'add work ' + date + ' ' + roundDuration(Number(perfTemp.@duration),15) + 'm ' + perfTemp.@name;
+					youTrackUploader.url = youTrackUploader.rootURL + '/rest/issue/' + perfTemp.@ytCode + '/execute';
+					var myToken:AsyncToken = youTrackUploader.send(params);
+					myToken.perf = perfTemp;
+				}
+			} else {
+				errorMsg1 += "\nYouTrack Uploader Login successful, nothing to upload";
+				//errorMsg2.text += "\nYouTrack Uploader Login successful, nothing to upload";			
+			}
+		}
+		
+		private function youTrackLoginFaultHandler(event:FaultEvent):void {
+			if (event.statusCode != 401) {
+				//errorMsg2.text += "\nYouTrack Uploader Login error " + event.statusCode;
+			}
+			errorMsg1 += "\nYouTrack Uploader Login error";
+			errorMsg1 = event.message.toString();
+		}
+		
+		private function inflowToDoLoaderResultHandler(event:ResultEvent):void {
+			trace(event);
+			inflowTodoData = new XMLListCollection(new XMLList(event.result as XML));
+			saveXMLToFile(inflowTodoData, "PersonalTimeKeeper5/InflowTasks.xml");			
+			errorMsg1 = "";		
+		}
+
+		private function inflowTypesLoaderResultHandler(event:ResultEvent):void {
+			trace(event);
+			inflowTypesData = new XMLListCollection(new XMLList(event.result as XML));
+			saveXMLToFile(inflowTypesData, "PersonalTimeKeeper5/InflowTypes.xml");			
+			errorMsg1 = "";		
+		}
+
+		private function inflowTypesLoaderFaultHandler(event:FaultEvent):void {
+			trace(event.statusCode);
+			errorMsg1 = event.message.toString();
+			if (event.statusCode != 401) {
+				event.preventDefault();
+				inflowTypesData = loadLocalFile("PersonalTimeKeeper5/InflowTypes.xml");						
+			}	
+		}
+		
+		private function inflowTodoLoaderFaultHandler(event:FaultEvent):void {
+			errorMsg1 = event.message.toString();
+			if (event.statusCode != 401) {
+				event.preventDefault();
+				inflowTodoData = loadLocalFile("PersonalTimeKeeper5/InflowTasks.xml");						
+			}	
+		}
+		
+		private function saveXMLToFile(xml:XMLListCollection, filePath:String):void {
+			var file:File = File.documentsDirectory.resolvePath(filePath);
+			var fs:FileStream = new FileStream();
+			fs.open(file, FileMode.WRITE);
+			fs.writeUTFBytes(xml.toString());
+			fs.close();
+		}
+		
+		private function loadLocalFile(filePath:String):XMLListCollection {
+			var file:File = File.documentsDirectory.resolvePath(filePath);
+			if (file.exists) {
+				var fileStream:FileStream = new FileStream();
+				fileStream.open(file, FileMode.READ);
+				var data:XML = XML(fileStream.readUTFBytes(fileStream.bytesAvailable));
+				fileStream.close();
+				var list:XMLList = new XMLList(data);
+				var collection:XMLListCollection = new XMLListCollection(list);
+				return collection;
+			} else {
+				var x:XMLListCollection = null;
+				return x;
+			}
+		}
+
+	    private function loadTask(date:Date):void {
+			var today:String = dayFormatter.format(date);
+			taskFile = File.documentsDirectory.resolvePath("PersonalTimeKeeper5/InflowTask.xml");
+			if (taskFile.exists) {
+				var fileStream:FileStream = new FileStream();
+				fileStream.open(taskFile, FileMode.READ);
+				var data:XML = XML(fileStream.readUTFBytes(fileStream.bytesAvailable));
+				var week:XMLList = data.children();
+		        taskGrid = new XMLListCollection(week);
+				fileStream.close();
+			} else {
+				taskGrid = new XMLListCollection();
+			}
+	    }
+	    
+		private function copyLocalFile(source:String, target:String):void {
+			var original:File = File.documentsDirectory.resolvePath(source);
+			if (original.exists) {
+				var newFile:File = File.documentsDirectory.resolvePath(target);
+				original.copyTo(newFile, true);
+			}
+		}
+		
+	    public function uploadClicked(event:MouseEvent):void {
+	    	//errorMsg2.text="Uploading one task";
+	    	//uploadTask2Inflow((XML)(grid.selectedItem));
+	    	//uploadTask2YouTrack((XML)(grid.selectedItem));
+	    	uploadTask((XML)(grid.selectedItem));
+	    }
+	    
+		private function uploadTasks():void {
+			//errorMsg2.text = "Uploading all tasks";
+			for each (var perf:XML in perfGrid) {
+				uploadTask(perf);
+			}
+		}
+		
+		private function uploadTask(perf: XML): void {
+			if (perf.hasOwnProperty('@path')) {
+				var projectArray : Array = perf.@path.split('/',1);
+				if (!isYTProject(projectArray[0]) || (perf.hasOwnProperty('@ytCode') && perf.@ytCode != '')) {
+						uploadTask2Inflow(perf);
+						uploadTask2YouTrack(perf);				
+				}
+			}
+		}
+		
+		private function uploadTask2Inflow(perf: XML):void {
+//			if (chkInFlow.selected) {
+//				if ((perf.@state == stateDefined || perf.@state == stateFailed) && Number(perf.@duration) > 0) {
+				if ((!perf.hasOwnProperty('@inReported') ||perf.@inReported == stateDefined || perf.@inReported == stateFailed) && Number(perf.@duration) > 0) {
+					var params : Object = new Object();
+					params.applicationId = Number(perf.@appId);
+					params.date = convertDateToInflowFormat(perf.@start);
+					if (Number(perf.@duration)>0) {
+						params.minutes = roundDuration(Number(perf.@duration),15);
+						trace(params.minutes);
+						params.title = perf.@name.toString();
+						params.comment = "";
+						params.description = perf.@description.toString();
+						params.typeId = Number(perf.@typeId);
+						params.chargeable = "Y";
+						var myToken:AsyncToken = inflowUploader.send(params);
+						myToken.perf = perf;
+					}
+				}
+//			}
+		}
+		
+		
+		public function isYTProject(project : String):Boolean{
+			var pattern : RegExp = /.*YT/;
+			return pattern.test(project);
+		}
+		
+		private var perfTemp : XML;
+		
+		private function uploadTask2YouTrack(perf:XML):void {
+//			if (chkYouTrack.selected) {
+//				if ((perf.@state == stateDefined || perf.@state == stateFailed) && Number(perf.@duration) > 0) {
+			if (perf.hasOwnProperty('@ytCode') && perf.@ytCode != '') {
+				if ((!perf.hasOwnProperty('@ytReported') || perf.@ytReported == stateDefined || perf.@ytReported == stateFailed) && Number(perf.@duration) > 0) {
+					var login :Object = new Object();
+					youTrackLogin.url = config.data.ytURL + "/user/login";
+					login.login = config.data.ytLogin;
+					login.password = config.data.ytPassword;
+					perfTemp = perf;
+					youTrackLogin.send(login);
+					youTrackLogin.url = youTrackLogin.rootURL;
+				}
+			}
+		}
+			
+		private function roundDuration(duration:int, round:int):int {
+			var rounded:int = Math.round(duration/15)*15;
+			return (rounded==0?duration:rounded);
+		}
+		
+		private function uploadTuesday(): void {
+		}
+		
+		public function uploadable(state:String, duration:String):Boolean {
+			if (state == stateReported || state == stateUndefined ) {
+				return false;
+			} else {
+				return true;
+			}
+		}
+		
+        public function changeType(event:Event):void {
+            grid.selectedItem.@typeId = event.currentTarget.selectedItem.@id;
+        }
+         
+		private function addTask():void{
+			  PopUpManager.addPopUp(addTaskScreen, this, true);
+			  PopUpManager.centerPopUp(addTaskScreen);
+			  addTaskScreen.title1.text = "";
+			  addTaskScreen.description.text = "";			
+		}
+
+		private var addTaskScreen:TaskPopup;
+
+		private function saveTask(e:Event):void
+		{
+		  var task:Task = new Task();
+		  task.title = addTaskScreen.title1.text;
+		  task.description = addTaskScreen.description.text;
+		  var taskXML:XML = <perf/>;
+		  taskXML.@title=task.title;
+		  taskXML.@description=task.description;
+		  taskGrid.addItem(taskXML);
+		  PopUpManager.removePopUp(addTaskScreen);
+		}
+		
+		private var taskFile:File;
+
+		private function saveTaskList():void
+		{
+		    var newXMLStr:String = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<list>\n" + taskGrid.toXMLString() + "\n</list>";
+		    var fs:FileStream = new FileStream();
+		    fs.open(taskFile, FileMode.WRITE);
+		    fs.writeUTFBytes(newXMLStr);
+		    fs.close();
+
+		}
+		
+        private var url1:String;
+        private var url2:String;
+        private var url3:String;
+
+		private var openTreeList: Object;   
+		      
+         
+         private var openItemList : SharedObject;
+         private var openPrefItemList : SharedObject;
+         private var openRecentItemList : SharedObject;
+         
+         private function loadYTIssues(e:Event):void
+         {
+	         var node:XML = e.currentTarget.selectedItem as XML; //inflowTreeView.selectedItem as XML;
+	         //var path : String = buildNodePath(node);
+	         //YTProjectSelected(path.split('/',1)[0]);
+			 refreshYTIssues(node);
+         }
+         
+		 private function refreshYTIssues(node:XML):void
+		 {
+			 var path : String = buildNodePath(node);
+			 YTProjectSelected(path.split('/',1)[0]);
+		 }
+			
+         private function selectInflowNode(e:MouseEvent):void
+         {
+	         var node:XML = e.currentTarget.selectedItem as XML; //inflowTreeView.selectedItem as XML;
+/*
+    		if (!e.altKey) {
+	       		projectSelection.text = buildNodePath(node);
+	       		grid.selectedItem = null;
+	       		newTaskName.text = "";
+           	} else {
+*/
+				//errorMsg.text = errorMsg.text +cnt++ + " ## " + e.type + e.clickCount;
+            	var isOpen:Boolean = e.currentTarget.isItemOpen(node);
+            	if (grid.selectedItem != null) {
+		       		grid.selectedItem.@task = node.@name;
+		       		grid.selectedItem.@path = buildNodePath(node);
+		       		grid.selectedItem.@appId = node.@id;
+		       		//grid.selectedItem.@state = stateDefined;
+					//YTProjectSelected(grid.selectedItem.@path.split('/',1)[0]);
+		       		e.currentTarget.selectedItem = null;
+					updateDayTotal();
+					savePerfBtn.enabled = true;
+					
+					
+            	}
+//            }
+            }
+
+          private function YTProjectSelected(project:String):void
+         {
+         	
+			youTrackProjectIssues.url = config.data.ytURL + '/rest/issue?max=9999&filter=project:"' + project + '"+' + config.data.ytFilter;
+			youTrackProjectIssues.addEventListener(ResultEvent.RESULT, youTrackProjectTicketsResultHandler);
+			youTrackProjectIssues.addEventListener(FaultEvent.FAULT,youTrackProjectTicketsFaultHandler);
+			var myToken2:AsyncToken = youTrackProjectIssues.send(null);         	
+         }
+         
+            private function selectInflowTypeNode(evt:MouseEvent):void
+            {
+            	var node:XML = evt.currentTarget.selectedItem as XML;
+/*
+   			if (!evt.altKey) {
+	       		nodeSelection.text = node.@name;
+	       		grid.selectedItem = null;
+	       		newTaskName.text = "";
+           	} else {
+*/           		setSelectedTaskType(evt.currentTarget as Tree);
+//				}
+            }
+            
+            private function selectInflowTodoNode(evt:ListEvent):void
+            {
+            }
+            
+            private function setSelectedTaskType(tree:Tree):void {
+             	var node:XML = tree.selectedItem as XML;
+            	//var isOpen:Boolean = inflowTypesView.isItemOpen(node);
+            	if (grid.selectedItem != null) {
+            		grid.selectedItem.@type = node.@name;
+	       			grid.selectedItem.@typeId = node.@id;
+					savePerfBtn.enabled = true;
+            	} 
+            } 
+            
+        private var cnt : int = 0;
+         
+         private function treeViewItemClicked(e:MouseEvent):void{
+	       	var node:XML = e.currentTarget.selectedItem as XML; //inflowTreeView.selectedItem as XML;
+           	var isOpen:Boolean = e.currentTarget.isItemOpen(node);
+           	var path:String = buildNodePath(node);
+          	var segmentArray:Array = path.split("/");
+			var fileName:String = "PersonalTimeKeeper5/xls/" + segmentArray[0] + ".xls";
+			var file:File = File.documentsDirectory.resolvePath(fileName);
+			if (file.exists) {
+	 			var xls:ExcelFile = readXL(fileName);
+				var sheet:Sheet = xls.sheets[0];
+				var tCols:int = sheet.cols;
+				var tRows:int = sheet.rows;
+					
+					//statusLabel.text = ef.sheets.length + " sheets; " + tCols + " columns; " + tRows + " rows";
+					
+				statsCollection = new ArrayCollection();
+					
+				for(var i:int=1; i<=tRows; i++){
+					var statsEntry:Object = new Object();
+					statsEntry.Code = sheet.getCell(i,1).value;
+					statsEntry.Description = sheet.getCell(i,6).value;
+					if(statsEntry.EventLabel != ""){
+						statsCollection.addItem(statsEntry);
+					}
+				}
+					
+//				topicsDatagrid.dataProvider = statsCollection;
+			} else {
+//				topicsDatagrid.dataProvider = null;
+			}
+//			errorMsg.text = errorMsg.text + cnt++ + " ## " + e.type + e.clickCount;
+/*
+           	if (e.type == "click" && grid.selectedItem != null) {
+	       		projectSelection.text = buildNodePath(node);
+	       		//grid.selectedItem = null;
+	       		newTaskName.text = "";
+           	}
+*/       }
+        
+        private function changedTab(e:Event):void {
+        	trace("test");
+        	config.data.selectedTab = tabnavigator1.selectedIndex;
+        	config.flush();
+        }
+
+            //import org.igorcosta.hacks.SWF;  
+  
+		public function showAPropos():void {  
+				var appXml:XML = NativeApplication.nativeApplication.applicationDescriptor;
+				var ns:Namespace = appXml.namespace();
+				var appVersion:String = appXml.ns::version[0];
+				
+				var airRuntime:String = NativeApplication.nativeApplication.runtimeVersion;
+				
+				//return appVersion;
+				Alert.show("Version: " + appVersion + "\n" + "AIRRuntime: " + airRuntime + "\n");
+		}
+
+		public function doNotSelectAll(event:Object):void {
+		}
+		
+		private function btnSetTakeUpClick():void {
+			grid.selectedItem.@duration = txtDuration.text;
+			clearAllDates();
+   			//updateDayTotal();
+			saveData();
+		}
+		
+		private function clearAllDates():void {
+			for each (var perf:XML in perfGrid) {
+				perf.@end = "";
+			}	
+		}
+			
+		private function btnSetTakeDownClick():void {
+			
+		}
+		
+		private function testYTCredentials(ytURL:String, ytLogin:String, ytPassword:String):void {
+			errorMsg1 = "\nTesting YouTrack credentials";
+			//errorMsg2.text= "\nTesting YouTrack credentials";
+			var login :Object = new Object();
+			youTrackLogin.url = ytURL + "/user/login";
+			login.login = ytLogin;
+			login.password = ytPassword;
+			perfTemp = null;
+			youTrackLogin.send(login);
+			youTrackLogin.url = youTrackLogin.rootURL;
+		}
+		
+		private function changeYTCredentials(_ytURL:String, ytLogin:String, ytPassword:String):void {
+			config.data.ytURL = _ytURL;
+			youTrackLogin.rootURL = _ytURL;
+			youTrackUploader.rootURL = _ytURL;
+			youTrackLogin.url = _ytURL;
+			youTrackUploader.url = _ytURL;
+			config.data.ytLogin = ytLogin;
+			config.data.ytPassword = ytPassword;
+			config.flush();
+			errorMsg1 += "\nYouTrack credentials changed";
+			//errorMsg2.text += "\nYouTrack credentials changed";
+		}
+		
+		private function changeINCredentials(inURL:String, inLogin:String, inPassword:String):void {
+			config.data.inURL = inURL;
+
+			config.data.inLogin = inLogin;
+			config.data.inPassword = inPassword;
+			config.flush();
+
+
+			var oEncoder:Base64Encoder = new Base64Encoder(); 
+			oEncoder.insertNewLines = false; 
+			oEncoder.encode(inLogin + ":" + inPassword); 
+			
+			inflowUploader.headers = {Authorization:"Basic " + oEncoder.toString()}; 
+			//errorMsg2.text += "\nInflow credentials changed";
+			errorMsg1 += "\nInflow credentials changed";
+		}
+		
+		private function getTicketName(item:Object, column:DataGridColumn) : String
+		{
+			var label:String = item.field.(@name=='summary').value;
+			return item.field.(@name=='summary').value;	
+		} 
+		
+		private function selectYTTicket(e:MouseEvent):void
+        {
+        	var node:XML = e.currentTarget.selectedItem as XML;
+           	if (grid.selectedItem != null) {
+	       		newTaskYTCode.text = node.@id;
+	       		changedYTCode();
+           	}
+         }
+
+		private function dragToDoExit(event:DragEvent):void
+		{
+			if (event.dragSource.hasFormat("items"))
+			{
+				
+/*
+				event.preventDefault();
+				event.currentTarget.hideDropFeedback(event);
+				//var dropTarget:List = DataGrid(event.currentTarget).dataProvider;
+				
+				var itemsArray:Array = event.dragSource.dataForFormat("items") as Array;
+				
+				var tempItem:Object= {label: itemsArray[0].label, data:itemsArray[0].data};
+				
+				var dropLoc:int = ((DataGrid(event.currentTarget).dataProvider) as List).calculateDropIndex(event);
+				
+				IList(List(DataGrid(event.currentTarget).dataProvider)).addItemAt(tempItem, dropLoc);
+*/
+				var index :int = event.target.selectedIndex;
+				
+				var xmlItem : XML = XML(event.target.dataProvider[index]);
+				
+			}
+		}
+
+		private function buildToolTip(item:Object):String{
+			return getTicketName(item, null);
+		}
+			
+		protected function ApplyYTFilter_clickHandler(event:MouseEvent):void
+		{
+			setYTFilter(YTFilter.text);
+		}
+		
+		protected function ResetYTFilter_clickHandler(event:MouseEvent):void
+		{
+			setYTFilter("assignee:me+state:unresolved");
+		}
+
+		private function setYTFilter(filter:String):void{
+			YTFilter.text = filter;
+			config.data.ytFilter=filter;
+			config.flush();
+			refreshYTIssues(inflowPrefTreeView.selectedItem as XML);						
+		}
+			
+		public function getYTColor(data:XML):uint
+		{
+			if (data.@ytReported == stateReported)
+			{
+				return StyleManager.getColorName('#00FF7F');
+			}
+			else if (data.@ytReported == stateFailed)
+			{
+				return StyleManager.getColorName('red');
+			}
+			else
+			{
+				return StyleManager.getColorName('none');
+			}
+		}
+			
+			public function getinColor(data:XML):uint
+			{
+				if (data.@inReported == stateReported)
+				{
+					return StyleManager.getColorName('#00FF7F');
+				}
+				else if (data.@inReported == stateFailed)
+				{
+					return StyleManager.getColorName('red');
+				}
+				else
+				{
+					return StyleManager.getColorName('none');
+				}
+			}
+			
+			public function updateytFilter(event:Event)
+			{
+				
+			}
+		]]>
+    </mx:Script>
+    <mx:HTTPService id="inflowTree" url="http://appli.pulsar.be/inFlowTracerPlus-rest/tree/" useProxy="false" 
+    	method="POST"
+        resultFormat="e4x"
+        result="inflowTreeLoaderResultHandler(event);"
+        fault="inflowTreeLoaderFaultHandler(event);"
+    />
+    <mx:HTTPService id="inflowTypes" url="http://appli.pulsar.be/inFlowTracerPlus-rest/types/perf/" useProxy="false"
+    	method="POST"
+        resultFormat="e4x"
+        result="inflowTypesLoaderResultHandler(event);"
+        fault="inflowTypesLoaderFaultHandler(event);"
+    />
+    <mx:HTTPService id="inflowUploader" url="http://appli.pulsar.be/inFlowTracerPlus-rest/perfs/" useProxy="false"
+    	method="POST"
+        resultFormat="e4x"
+        result="inflowUploaderResultHandler(event);"
+        fault="inflowUploaderFaultHandler(event);"
+    />
+    <mx:HTTPService id="youTrackLogin" url="http://jll.myjetbrains.com/youtrack/rest/user/login" useProxy="false"
+    	method="POST"
+        resultFormat="e4x"
+        result="youTrackLoginResultHandler(event);"
+        fault="youTrackLoginFaultHandler(event);"
+    />
+    <mx:HTTPService id="youTrackUploader" url="http://jll.myjetbrains.com/youtrack/rest/issue/IP1-8/execute" useProxy="false"
+    	method="POST"
+        resultFormat="e4x"
+        result="youTrackUploaderResultHandler(event);"
+        fault="youTrackUploaderFaultHandler(event);"
+    />
+    <mx:HTTPService id="youTrackProjects" url="http://jll.myjetbrains.com/youtrack/rest/project/all" useProxy="false"
+    	method="POST"
+        resultFormat="e4x"
+    />
+    <mx:HTTPService id="youTrackToDo" url="http://jll.myjetbrains.com/youtrack/rest/project/all" useProxy="false"
+    	method="POST"
+        resultFormat="e4x"
+    />
+    <mx:HTTPService id="youTrackProjectIssues" url="http://jll.myjetbrains.com/youtrack/rest/issue/byproject" useProxy="false"
+    	method="POST"
+        resultFormat="e4x"
+    />
+    <mx:HTTPService id="redmineIssues" url="http://localhost/redmine/issues/" useProxy="false"
+    	method="GET"
+        resultFormat="e4x"
+        result="redmineIssueLoaderResultHandler(event);"
+        fault="redmineIssueLoaderFaultHandler(event);"
+    />
+    <mx:HTTPService id="redmineLogTime" url="http://localhost/redmine/projects/aixmdb/timelog/edit" useProxy="false"
+    	method="POST"
+        resultFormat="e4x"
+        result="redmineIssueLoaderResultHandler(event);"
+        fault="redmineIssueLoaderFaultHandler(event);"
+    />
+   <mx:HBox width="100%" height="100%">
+   	<mx:Canvas id="trees" width="30%" height="100%" minWidth="400">
+	    <mx:TabNavigator x="3" y="3" width="100%" height="100%" id="tabnavigator1" change="changedTab(event)">
+	      <mx:Canvas label="Full" width="100%" height="10%" id="canvas1"  >
+			  <mx:VDividedBox height="100%" width="100%">
+		         <mx:HDividedBox  width="100%" height="50%" paddingLeft="2" paddingRight="2" paddingBottom="2" paddingTop="2" >
+					 <mx:VBox width="50%" height="100%">
+		            <mx:Tree id="inflowTreeView" width="100%" height="95%" dataProvider="{inflowTreeData}" labelField="data" labelFunction="treeLabel" 
+		            	showRoot="true" itemRenderer="myComponents.MyTreeItemRenderer" doubleClickEnabled="true" 
+		            	                itemOpen="saveNodeState(event);" itemClose="saveNodeState(event);"
+		            	                dataDescriptor="{new myComponents.TreeDataDescriptor}" itemClick="loadYTIssues(event)" doubleClick="selectInflowNode(event)"> 
+		            </mx:Tree>
+						 <mx:Button label="Refresh" id="refreshBtn" height="5%" click="refreshTrees();"/>
+						 
+					 </mx:VBox>
+		            <mx:Tree id="inflowTypesView" width="50%" height="100%" dataProvider="{inflowTypesData}" labelField="data" labelFunction="treeLabel" 
+		               	showRoot="false" itemRenderer="myComponents.MyTreeItemRenderer" doubleClickEnabled="true" doubleClick="selectInflowTypeNode(event);" dataDescriptor="{new myComponents.TypeTreeDataDescriptor}" >
+		            </mx:Tree>
+				 </mx:HDividedBox>
+					 <mx:DataGrid id="ytTickets0" width="100%" height="50%" dataProvider="{youTrackProjectTicketList.list}" doubleClickEnabled="true" doubleClick="selectYTTicket(event)" dataTipFunction="buildToolTip">
+						 <mx:columns>
+							 <mx:DataGridColumn headerText="id" dataField="@id" width="{Math.round(this.ytTickets0.width * 0.33)}"/>
+							 <mx:DataGridColumn headerText="description" dataField="field.value" labelFunction="getTicketName" showDataTips="true">
+							</mx:DataGridColumn>
+						 </mx:columns>
+					 </mx:DataGrid>
+			  </mx:VDividedBox>
+	      </mx:Canvas>
+	      <mx:Canvas label="Preferred" width="100%" height="100%" id="canvas2">
+			  <mx:VDividedBox height="100%" width="100%">
+				  <mx:HDividedBox width="100%" height="50%" paddingLeft="2" paddingRight="2" paddingBottom="2" paddingTop="2">
+					  <mx:Tree id="inflowPrefTreeView" width="50%" height="100%" dataProvider="{inflowPrefTreeData}" labelField="data" labelFunction="treeLabel" 
+							   showRoot="true" itemRenderer="myComponents.MyPrefTreeItemRenderer" doubleClickEnabled="true" doubleClick="selectInflowNode(event);" itemClick="loadYTIssues(event)" 
+							   itemOpen="savePrefNodeState(event);" itemClose="savePrefNodeState(event);" dataDescriptor="{new myComponents.PrefTreeDataDescriptor}" creationComplete="showPrefTree(event);"> 
+					  </mx:Tree>
+						  <mx:Tree id="inflowPrefTypesView" width="50%" height="100%" dataProvider="{inflowTypesData}" labelField="data" labelFunction="treeLabel" 
+								   showRoot="false" itemRenderer="myComponents.MyTreeItemRenderer" doubleClickEnabled="true" doubleClick="selectInflowTypeNode(event);" dataDescriptor="{new myComponents.TypeTreeDataDescriptor}">
+						  </mx:Tree>
+				  </mx:HDividedBox>
+				  <mx:VBox width="100%" height="50%">
+					  <mx:HBox width="100%">
+						  <mx:TextInput id="YTFilter" width="100%" text="{config.data.ytFilter}"/>
+						  <mx:Button id="ApplyYTFilter" label="Apply"
+									 click="ApplyYTFilter_clickHandler(event)"/>
+						  <mx:Button id="ResetYTFilter" label="Reset"
+									 click="ResetYTFilter_clickHandler(event)"/>
+					  </mx:HBox>
+					  <mx:DataGrid id="ytTickets1" width="100%" height="95%" dataProvider="{youTrackProjectTicketList.list}" doubleClickEnabled="true" doubleClick="selectYTTicket(event)" dataTipFunction="buildToolTip">
+						  <mx:columns>
+							  <mx:DataGridColumn headerText="id" dataField="@id" width="{Math.round(this.ytTickets1.width * 0.33)}"/>
+							  <mx:DataGridColumn headerText="description" dataField="field.value" labelFunction="getTicketName" showDataTips="true"/>
+						  </mx:columns>
+					  </mx:DataGrid>
+				  </mx:VBox>
+			  </mx:VDividedBox>
+<!--		         <mx:Button x="371" y="679" label="Start timer" width="92" id="startPrefTimerBtn" click="startNewPrefTaskClick(event)" height="25"/>
+		         <mx:TextInput x="10" y="680" id="newPrefTaskName" width="353"/> -->
+	      </mx:Canvas>
+	      <mx:Canvas label="Recent" width="100%" height="100%" id="canvas3">
+	         <mx:Tree id="recentTasks" dataProvider="{recentTaskTree}" width="433" labelField="data" labelFunction="treeLabel" 
+	          	showRoot="true" itemRenderer="myComponents.MyRecentTaskItemRenderer" doubleClickEnabled="true" itemDoubleClick="selectRecentTask(event);" height="699"
+	          	dataDescriptor="{new myComponents.RecentTasksTreeDataDescriptor}" creationComplete="showRecentTree(event);" itemOpen="saveRecentNodeState(event);" itemClose="saveRecentNodeState(event);"> 
+	          </mx:Tree>
+	      </mx:Canvas>
+
+	      <mx:Canvas label="Parameters" width="100%" height="100%" id="canvas4">
+	        <mx:Form x="10" y="10" width="99%" height="207">
+	        	<mx:FormHeading label="YouTrack" />
+				<mx:FormItem label="URL" width="99%">
+					<mx:TextInput id="ytURL" text="{config.data.ytURL}" width="99%"/>
+				</mx:FormItem>
+				<mx:FormItem label="Login">
+					<mx:TextInput id="ytLogin" text="{config.data.ytLogin}"/>
+				</mx:FormItem>
+				<mx:FormItem label="Password">
+					<mx:TextInput id="ytPassword" displayAsPassword="true" text="{config.data.ytPassword}"/>
+				</mx:FormItem>
+				<mx:FormItem>
+		            <mx:Button label="Test credentials" id="myTestYTButton" 
+		                click="testYTCredentials(ytURL.text, ytLogin.text, ytPassword.text);"/>
+				</mx:FormItem>
+				<mx:FormItem>
+		            <mx:Button label="Change credentials" id="mySubmitYTButton" 
+		                click="changeYTCredentials(ytURL.text, ytLogin.text, ytPassword.text);"/>
+				</mx:FormItem>
+	        </mx:Form>
+	        <mx:Form x="10" y="225" width="99%" height="214">
+	          <mx:FormHeading label="Inflow" />
+	          <mx:FormItem label="URL" width="99%">
+	          	<mx:TextInput id="inURL" text="{config.data.inURL}" width="99%"/>
+	          </mx:FormItem>
+	          <mx:FormItem label="Login">
+	          	<mx:TextInput id="inLogin" text="{config.data.inLogin}"/>
+	          </mx:FormItem>
+	          <mx:FormItem label="Password">
+	          	<mx:TextInput id="inPassword" displayAsPassword="true" text="{config.data.inPassword}"/>
+	          </mx:FormItem>
+	          <mx:FormItem>
+	                    <mx:Button label="Change credentials" id="mySubmitINButton" 
+	                        click="changeINCredentials(inURL.text, inLogin.text, inPassword.text);"/>
+	          </mx:FormItem>
+	        </mx:Form>
+	      </mx:Canvas>
+	      <mx:Canvas label="ToDo" width="100%" height="100%">
+			  <mx:VBox width="100%" height="100%">
+				  <mx:DataGrid id="ToDoGrid" width="100%" height="95%" dragEnabled="true" dropEnabled="true" dragMoveEnabled="true" dataProvider="{youTrackToDoList.list}" dragDrop="dragToDoExit(event)" dataTipFunction="buildToolTip">
+					  <mx:columns>
+						  <mx:DataGridColumn headerText="id" dataField="@id" width="{Math.round(this.ToDoGrid.width * 0.33)}"/>
+						  <mx:DataGridColumn headerText="description" dataField="field.value" labelFunction="getTicketName" showDataTips="true"/>
+					  </mx:columns>
+				  </mx:DataGrid>
+				  <mx:Button id="refreshBtn0" height="5%" label="Refresh"
+							 click="refreshToDo();"/>
+									  
+			  </mx:VBox>
+	      </mx:Canvas>
+	      <mx:Canvas label="Errors" width="100%" height="100%" id="canvas5">
+	        <mx:TextArea x="10" y="10" width="96%" height="98%" id="errorMsg" text="{errorMsg1}"/>
+	      </mx:Canvas>
+	      <!--mx:Canvas label="Tasks" width="99%" height="99%" >
+	         <mx:DataGrid dragEnabled="true" dropEnabled="true" dragMoveEnabled="true" id="grid0" x="10" y="0" editable="true" dataProvider="{taskGrid}" height="665" width="453" maxHeight="340" maxWidth="503" variableRowHeight="true" sortableColumns="false" allowMultipleSelection="true">
+	         	<mx:columns>
+	         		<mx:DataGridColumn headerText="Title" dataField="title" editable="false" width="125">
+	         		         <mx:itemRenderer>
+	         		          	<mx:Component>
+	         		          	   	<mx:Text width="100%" text="{XML(data).@title}"/>
+	         		          	   </mx:Component>
+	         		          </mx:itemRenderer>				
+	         		</mx:DataGridColumn>
+	         		<mx:DataGridColumn headerText="Description"  editable="false" width="250">
+	         		         <mx:itemRenderer>
+	         		          	<mx:Component>
+	         		          	   	<mx:Text width="100%" text="{XML(data).@description}" />
+	         		          	   </mx:Component>
+	         		          </mx:itemRenderer>				
+	         		</mx:DataGridColumn>
+	             	<mx:DataGridColumn headerText="" width="35" id="deleteColumn" editable="false">
+						<mx:itemRenderer>
+	                		<mx:Component>
+	   							<mx:Button click="outerDocument.deleteTaskClicked(event)" icon="@Embed(source='/icons/Trash-Empty-32.png')" toolTip="Delete"/>
+	            			</mx:Component>
+	                 	</mx:itemRenderer>
+	            	</mx:DataGridColumn>
+	        	</mx:columns>
+	         </mx:DataGrid>
+	         <mx:Button x="10" y="673" label="Add" click="addTask();"/>
+	         <mx:Button x="409" y="673" label="Save" click="saveTaskList();"/>
+	      </mx:Canvas-->
+	      <!--mx:Canvas label="Issues" width="99%" height="99%" visible="false">
+	         <mx:Tree id="redmineissues" dataProvider="{redmineIssueTreeData}" x="10" y="10" width="453" labelField="data" labelFunction="treeLabel" 
+	          	showRoot="true" itemRenderer="myComponents.MyRecentTaskItemRenderer" doubleClickEnabled="true" itemDoubleClick="selectRecentTask(event);" height="699"
+	          	dataDescriptor="{new myComponents.RecentTasksTreeDataDescriptor}" creationComplete="showRecentTree(event);" itemOpen="saveRecentNodeState(event);" itemClose="saveRecentNodeState(event);"> 
+	          </mx:Tree>
+	      </mx:Canvas-->	   </mx:TabNavigator>
+	</mx:Canvas>  
+  	<mx:Canvas id="grids" width="76%" height="100%" minWidth="485">
+  		<mx:VBox width="100%" height="100%" x="5" y="5">
+ 		  <mx:Canvas id="topButtonBox" width="100%" height="79" minWidth="930" maxHeight="79" minHeight="79" top="5" left="5">
+		      	<mx:Label x="735.5" y="12" text="Day total" fontSize="15" fontWeight="bold" id="label1" width="106"/>
+		      	<mx:Text id="today" x="850.5" y="12" width="79.5" fontSize="15" fontWeight="bold" enabled="false" disabledColor="#040404" textAlign="right"/>
+		      	<mx:Button x="5" y="44" label="Reset task" click="resetTask();" id="resetTaskBtn" height="25" width="92"/>
+		      	<mx:Button x="184" y="44" label="Insert between" click="insertTask();" id="insertTaskBtn" height="25" toolTip="Select two adjacent tasks. An empty one will be inserted." visible="false"/>
+		      	<mx:Button x="302" y="44" label="Insert above" click="insertTaskAbove();" id="insertTaskAboveBtn" height="25" />
+		      	<mx:Button x="405.5" y="44" label="Insert below" click="insertTaskBelow();" id="insertTaskBelowBtn" height="25" />
+		      	<mx:Button x="101" y="44" label="Split task" click="splitTask();" id="splitTaskBtn" height="25" toolTip="Interrupt current task with an empty one. Then resume current task. Useful if you've been interrupted..."/>
+		      	<mx:Text x="523.5" y="15" id="clock" width="83" fontSize="15"/>
+		      	<mx:Text x="420.5" y="15" id="dateSelector" width="99" fontSize="15"/>
+		      	<mx:Text x="849.5" y="43" width="80.5" id="currentDuration"  fontSize="15" fontWeight="bold" textAlign="right"/>
+		      	<mx:Label x="733.5" y="45" text="Current task" fontSize="15" fontWeight="bold" id="label0"/>
+		      	<mx:Button x="370.5" y="14" label="&lt;=" width="47" click="previousDay();" id="previouDayBtn"/>
+		      	<mx:Button x="610.5" y="14" label="=&gt;" width="47" click="nextDay();" id="nextDayBtn"/>
+		      	<mx:Button x="665.5" y="14" label="Today" click="displayToday();" id="todayBtn" enabled="false"/>
+		      	<mx:Button x="546.5" y="44" label="Pause" click="pauseTask();" id="pauseBtn" height="25"/>
+		      	<mx:Button x="940" y="13" label="Upload data" id="savePerfBtn0" click="uploadTasks();" height="25" width="101"/>
+		      	<mx:Button x="5" y="8" label="New task" width="173" id="startTimerBtn" click="startNewTaskClick(event)" height="30"/>
+		      	<mx:Button x="609.5" y="44" label="Continue away" click="continueTaskAway();" id="awayBtn" height="25" width="116"/>
+		      	<mx:DateField x="235.5" y="14" id="dtDateToDisplay" change="displaySelectedDate()" formatString="YYYY/MM/DD HH:MM"/>
+		      	<mx:CheckBox x="940" y="37" label="InFlow" id="chkInFlow" selected="true" visible="false"/>
+		      	<mx:CheckBox x="940" y="57" label="YouTrack" id="chkYouTrack" selected="true" visible="false"/>
+			  <mx:Button x="1092" y="15" label="A propos" click="showAPropos();"/>
+		  </mx:Canvas>
+		  <mx:Canvas width="100%" height="{grids.height - topButtonBox.height - bottomButtonBox.height - 20}">
+		  	
+		  <mx:DataGrid id="grid" x="5" editable="false" dataProvider="{perfGrid}" height="100%" width="100%" itemClick="itemClicked(event);" variableRowHeight="true" sortableColumns="false" allowMultipleSelection="true"> 
+		      <mx:columns>
+		      	<mx:DataGridColumn headerText="YT code" dataField="ytCode" editable="false" width="50" >
+		      	         <mx:itemRenderer>
+		      	          	<mx:Component>
+								<mx:Box borderStyle="solid" backgroundColor="{outerDocument.getYTColor(XML(data))}">
+									<mx:Text width="100%" text="{XML(data).@ytCode}" toolTip="{XML(data).@ytCode}" >
+									</mx:Text>
+								</mx:Box>
+		      	          	   </mx:Component>
+		      	          </mx:itemRenderer>				
+		      	</mx:DataGridColumn>
+		      	<mx:DataGridColumn headerText="Project" dataField="path" editable="false" width="125" >
+		      	         <mx:itemRenderer>
+		      	          	<mx:Component>
+								<mx:Box borderStyle="solid" backgroundColor="{outerDocument.getinColor(XML(data))}">
+		      	          	   		<mx:Text width="100%" text="{XML(data).@path.split('/',1)[0]}" toolTip="{XML(data).@path}"/>
+								</mx:Box>
+		      	          	   </mx:Component>
+		      	          </mx:itemRenderer>				
+		      	</mx:DataGridColumn>
+		      	<mx:DataGridColumn headerText="Node"  editable="false" width="125">
+		      	         <mx:itemRenderer>
+		      	          	<mx:Component>
+		      	          	   	<mx:Text width="100%" text="{XML(data).@task}" toolTip="{XML(data).@path}"/>
+		      	          	   </mx:Component>
+		      	          </mx:itemRenderer>				
+		      	</mx:DataGridColumn>
+		      	<mx:DataGridColumn headerText="Type" dataField="type" editable="false" width="135">
+		      	         <mx:itemRenderer>
+		      	          	<mx:Component>
+		      	          	   	<mx:Text width="100%" text="{XML(data).@type}" />
+		      	          	   </mx:Component>
+		      	          </mx:itemRenderer>				
+		      	         <!--mx:itemRenderer>
+		      	          	<mx:Component>
+		      	          		<mx:ComboBox prompt="Select one" labelField="@name" change="outerDocument.changeType(event)" 
+		      	          			dataProvider="{outerDocument.inflowTypes.lastResult.children()}" />
+		      	              </mx:Component>
+		      	          </mx:itemRenderer-->				
+		      	</mx:DataGridColumn>
+		      	<mx:DataGridColumn headerText="Title" dataField="@name" editable="false" editorDataField="text" width="200">
+<!--		      		<mx:itemRenderer>
+		      			<mx:Component>
+		      				<mx:TextInput focusIn="outerDocument.doNotSelectAll(event)">
+		      					
+		      				</mx:TextInput>
+		      			</mx:Component>
+		      		</mx:itemRenderer> -->
+		      	</mx:DataGridColumn>
+		        <mx:DataGridColumn headerText="" width="40" id="takeOneColumn1" editable="false">
+		            <mx:itemRenderer>
+		                  	<mx:Component>
+	                      			<mx:VBox>
+		                      			<mx:Button click="outerDocument.takeAllDownClicked(event)" icon="@Embed(source='/icons/16/97.png')" label="v" toolTip="Absorb task below" width="33" height="20"/>
+		                      			<mx:Button buttonDown="outerDocument.takeOneDownClicked(event)" autoRepeat="true" icon="@Embed(source='/icons/16/99.png')" label="v" toolTip="Take 1 from task below" width="33" height="20"/>
+		                      		</mx:VBox>
+		                      	</mx:Component>
+		            </mx:itemRenderer>
+		        </mx:DataGridColumn>
+		      	<mx:DataGridColumn headerText="Start" dataField="@start" editable="false" width="40" fontWeight="bold">
+		      		<mx:itemRenderer>
+						<mx:Component>
+		      		         	   	<mx:Text width="100%" text="{outerDocument.formatTime(XML(data).@start)}" />
+						</mx:Component>
+      		       	</mx:itemRenderer>				
+		      	</mx:DataGridColumn>
+		      	<mx:DataGridColumn headerText="Duration" dataField="duration" editable="false" width="60" fontWeight="bold">
+		      		<mx:itemRenderer>
+		      		         	<mx:Component>
+		      		         	   	<mx:Text width="100%" text="{outerDocument.shortFormatDuration(XML(data).@duration)}"/>
+		      		         	</mx:Component>
+		      		          </mx:itemRenderer>
+		      	</mx:DataGridColumn>
+		      	<mx:DataGridColumn headerText="End" dataField="end" editable="false" width="40" visible="true" fontWeight="bold">
+		      		<mx:itemRenderer>
+		      		         	<mx:Component>
+		      		         	   	<mx:Text width="100%" text="{outerDocument.formatTime(XML(data).@end)}" />
+		      		         	   </mx:Component>
+		      		         </mx:itemRenderer>
+		      	      </mx:DataGridColumn>			
+		        <mx:DataGridColumn headerText="" width="20" editable="true" editorDataField="value" rendererIsEditor="true" id="stepper" visible="false">
+		            <mx:itemRenderer>
+		                      	<mx:Component>
+		                      	   	<mx:NumericStepper width="20" change="outerDocument.inGridStepperChanged(event)" doubleClickEnabled="true" minimum="-1" maximum="1" value="0"/>
+		                      	</mx:Component>
+		            </mx:itemRenderer>
+		         </mx:DataGridColumn>
+		         <!--mx:DataGridColumn headerText="" width="20" editable="true" editorDataField="value" rendererIsEditor="true" id="merger">
+		             <mx:itemRenderer>
+		                 	<mx:Component>
+		                     	<mx:NumericStepper width="5" change="outerDocument.inGridStepperChanged(event)" minimum="-1" maximum="1" value="0"
+		                     		upArrowSkin="@Embed(source='/icons/2uparrow-32.png')"
+		                             downArrowSkin="@Embed(source='/icons/2dowarrow-32.png')"/>
+		             		</mx:Component>
+		                  </mx:itemRenderer>
+		             </mx:DataGridColumn-->
+		          <mx:DataGridColumn headerText="" width="40" id="takeOneColumn" editable="false">
+		             <mx:itemRenderer>
+		                      	<mx:Component>
+		                      		<mx:VBox>
+		                      		<mx:Button buttonDown="outerDocument.takeOneUpClicked(event)" autoRepeat="true" icon="@Embed(source='/icons/16/98.png')" label="^" toolTip="Take 1 from task above" width="33" height="20"/>
+		                      		<mx:Button click="outerDocument.takeAllUpClicked(event)" icon="@Embed(source='/icons/16/96.png')" label="^" toolTip="Absorb task above" width="33" height="20"/>
+		                      		<!-- mx:Button buttonDown="outerDocument.takeOneDownClicked(event)" autoRepeat="true" icon="@Embed(source='/icons/16/99.png')" label="v" toolTip="Take 1 from task below" width="33" height="20"/ -->
+		                      		</mx:VBox>
+		                      	</mx:Component>
+		                       </mx:itemRenderer>
+		             </mx:DataGridColumn>
+		             <mx:DataGridColumn headerText="" width="42" id="resumeColumn" editable="false" resizable="false" paddingLeft="1" paddingRight="1">
+		             	<mx:itemRenderer>
+		                	<mx:Component>
+		                      	<mx:Button click="outerDocument.resumeClicked(event)" icon="@Embed(source='/icons/document-copy.png')" toolTip="Resume"/>
+		                    </mx:Component>
+		                </mx:itemRenderer>
+		             </mx:DataGridColumn>
+		             <mx:DataGridColumn headerText="" width="42" id="deleteColumn2" editable="false" resizable="false">
+		             	<mx:itemRenderer>
+		                      	<mx:Component>
+		                      	<mx:Button click="outerDocument.deleteClicked(event)" icon="@Embed(source='/icons/document-delete.png')" toolTip="Delete"/>
+		                      	</mx:Component>
+		                </mx:itemRenderer>
+		             </mx:DataGridColumn>
+		             <mx:DataGridColumn headerText="" width="42" id="uploadColumn" editable="false" resizable="false">
+		                  <mx:itemRenderer>
+		                  	<mx:Component>
+		                  		<mx:HBox xmlns:mx="http://www.adobe.com/2006/mxml" horizontalAlign="center" verticalAlign="middle">
+		                  		<mx:Script>
+						   <![CDATA[
+						   	import mx.controls.Button;
+						   	import mx.controls.Image;
+						   	import mx.messaging.AbstractConsumer;
+						    private var _data:Object;
+							[Embed('/icons/document-go.png')]
+						    public var uploadIcon:Class;
+						
+							override public function set data(value:Object):void
+						    {
+						    	_data = value;
+								var rating:Number = Number(value.rating);
+						       	removeAllChildren();
+						        var perf:XML = value as XML;
+								if (isUploadable(perf)) {
+									var btn: Button = new Button();
+									btn.height=46;
+									btn.width=46;
+									btn.setStyle('icon',uploadIcon);
+									btn.addEventListener(MouseEvent.CLICK,outerDocument.uploadClicked);
+									addChild(btn);
+									//var idx:int = (value as DataRow).
+								}
+						    }
+								
+							override public function get data():Object
+						    {
+						       return _data;
+						    }
+						
+							public function isUploadable(perf:XML):Boolean {
+							   if (!perf.hasOwnProperty('@duration') || perf.@duration=='0') return false;
+							   if (!perf.hasOwnProperty('@type') || perf.@type =='') return false;
+							   if (perf.@name =='') return false;
+							   if (perf.@task =='') return false;
+							   if (outerDocument.isYTProject(perf.@path.split('/',1)[0]) && perf.hasOwnProperty("@ytReported") && perf.@ytReported == outerDocument.stateReported && perf.hasOwnProperty("@inReported") && perf.@inReported == outerDocument.stateReported) return false;
+							   if (!outerDocument.isYTProject(perf.@path.split('/',1)[0]) && (!perf.hasOwnProperty("@ytReported") || perf.@ytReported == outerDocument.stateReported) && perf.hasOwnProperty("@inReported") && perf.@inReported == outerDocument.stateReported) return false;
+								   
+							   //if (perf.@duration != '' && perf.@path.split('/',1)[0] != '' && perf.@task != '' && perf.@type != '' && perf.@name != '')
+							   //{
+								   if (outerDocument.isYTProject(perf.@path.split('/',1)[0]))
+								   {
+										return (perf.hasOwnProperty("@ytCode") && perf.@ytCode != '');   
+								   }
+								   else
+								   {
+									   return true;
+								   }
+							   //}
+							   //else
+							   //{
+								//   return false;
+							   //}
+							}
+						   ]]>
+						 </mx:Script>
+		                  		</mx:HBox>
+		                  	</mx:Component>
+		                  </mx:itemRenderer>
+		             </mx:DataGridColumn>
+				  <mx:DataGridColumn width="5" resizable="false">
+					  
+				  </mx:DataGridColumn>
+<!--		      	<mx:DataGridColumn headerText="State" dataField="state" editable="false" width="60">
+	      	         <mx:itemRenderer>
+	      	          	<mx:Component>
+	      	          	   	<mx:Text width="100%" text="{XML(data).@state}"/>
+	      	          	   </mx:Component>
+	      	          </mx:itemRenderer>				
+		      	</mx:DataGridColumn>
+		      	<mx:DataGridColumn headerText="Reported" editable="false" width="80" minWidth="80">
+	      	         <mx:itemRenderer>
+	      	          	<mx:Component>
+	      	          		<mx:VBox>
+          	   			      	<mx:CheckBox label="InFlow" id="chkInFlow" selected="{XML(data).@inReported == 'reported'}" enabled="false" disabledColor="black"/>
+          	   			      	<mx:CheckBox label="YouTrack" id="chkYtFlow" selected="{XML(data).@ytReported == 'reported'}" enabled="false" disabledColor="black"/>
+	      	          		</mx:VBox>
+	      	          	</mx:Component>
+	      	          </mx:itemRenderer>				
+		      	</mx:DataGridColumn> -->
+		      </mx:columns>
+		   </mx:DataGrid>
+		  </mx:Canvas>
+
+		  <mx:Canvas width="99%" height="344" bottom="2" x="5" y="5" id="bottomButtonBox">
+		   	<mx:Button label="Copy" width="80" enabled="true" id="copyBtn" click="copyDescription();" right="46" top="40"/>
+		   	<mx:Button y="70" label="Paste" width="80" enabled="false" id="pasteBtn" click="pasteDescription();" right="46"/>
+		   	<mx:TextInput id="txtDuration" x="723" y="12" text="" enabled="false" width="49"/>
+		   	<mx:Button id="btnSetTakeUp" x="780" y="10" label="Set duration" enabled="false" click="btnSetTakeUpClick();" />
+		   	<mx:Button x="1032" y="182" label="Save data" id="savePerfBtn" click="saveData();" height="25"/>
+					<mx:TabNavigator x="10" y="20" width="1009" height="307">
+						<mx:Canvas width="100%" height="100%" label="Task">
+							<mx:TextInput x="70" y="10" id="newTaskYTCode" width="172" text="{grid.selectedItem.@ytCode}" change="changedYTCode();"/>
+							<mx:TextInput x="70" y="41" id="newTaskName" width="826" text="{grid.selectedItem.@name}" change="changedTitle();"/>
+							<mx:TextArea id="descriptionInput" x="70" y="67" width="826" height="81"
+										 change="changedDescription();"
+										 text="{grid.selectedItem.@description}"/>
+							<mx:Label x="0" y="43" text="Title"/>
+							<mx:Label x="0" y="68" text="Description"/>
+							<mx:Label x="0" y="12" text="YT code"/>
+						</mx:Canvas>
+						<mx:Canvas width="100%" height="100%" label="Log">
+							<mx:Label x="10" y="10" text="Logs"/>
+							<mx:TextArea id="txtLog" x="46" y="9" width="951" height="255" text="{log}"/>
+						</mx:Canvas>
+					</mx:TabNavigator>
+		   </mx:Canvas>
+ 		</mx:VBox>
+    </mx:Canvas>
+   </mx:HBox>
+
+    <!--myComponents:SortedTree id="mySiteMap" siteMapIDField="id" siteMapLabelField="name" dataProvider="{new ArrayCollection(inflowTree.lastResult.valueOf())}" sortItems="{true}" rememberOpenState="true" /-->    
+	<mx:DateFormatter id="dateFormatter" formatString="YYYY/MM/DD HH:NN"/>
+	<mx:DateFormatter id="startDayDateFormatter" formatString="YYYY/MM/DD 00:00"/>
+	<mx:DateFormatter id="dayFormatter" formatString="YYYYMMDD"/>
+	<mx:DateFormatter id="prettyDayFormatter" formatString="DD/MM/YYYY"/>
+	<mx:DateFormatter id="prettyTimeFormatter" formatString="HH:NN"/>
+	<mx:DateFormatter id="minuteFormatter" formatString="LL:NN"/>
+	<mx:DateFormatter id="inflowDateFormatter" formatString="DD-MM-YYYY HH:NN:SS"/>
+	<mx:NumberFormatter id="durationFormatter" precision="2" rounding="nearest"/>
+	<!--mx:Button x="10" y="14" label="Start Day" id="startDayBtn" click="startDay()" enabled="false"/-->
+	<!--mx:Button x="99" y="14" label="End Day" id="endDayBtn" click="endDay()" enabled="false"/-->
+	<mx:VSlider id="durationChange" x="1093" y="63" height="313" minimum="0" change="sliderChanged();" snapInterval="1" tickInterval="10" enabled="false" visible="false"/>
+	<!-- mx:Button x="791" y="505" label="Save" width="80" click="saveComment();" enabled="false" id="saveBtn"/ -->
+  	<mx:states>
+   		<mx:State name="REST">
+   				<mx:SetProperty target="{newTaskBtn}" name="visible" value="false"/>
+   				<mx:SetProperty target="{resetTaskBtn}" name="visible" value="false"/>
+   				<mx:SetProperty target="{todayBtn}" name="visible" value="false"/>
+   				<mx:SetProperty target="{previouDayBtn}" name="visible" value="false"/>
+   				<mx:SetProperty target="{nextDayBtn}" name="visible" value="false"/>
+   				<mx:SetProperty target="{copyBtn}" name="visible" value="false"/>
+   				<mx:SetProperty target="{startTimerBtn}" name="visible" value="false"/>
+   				<mx:SetProperty target="{endNowStartBtn}" name="visible" value="false"/>
+   				<mx:SetProperty target="{refreshBtn}" name="visible" value="false"/>
+   				<mx:SetProperty target="{savePerfBtn}" name="visible" value="false"/>
+   				<mx:SetProperty target="{pasteBtn}" name="visible" value="false"/>
+   				<mx:SetProperty target="{dateSelector}" name="y" value="13"/>
+   				<mx:SetProperty target="{clock}" name="y" value="14"/>
+   				<mx:SetProperty target="{currentDuration}" name="y" value="14"/>
+   				<mx:SetProperty target="{today}" name="y" value="14"/>
+   				<mx:SetProperty target="{label0}" name="y" value="14"/>
+   				<mx:SetProperty target="{label1}" name="y" value="14"/>
+   				<mx:SetProperty target="{grid}" name="y" value="41"/>
+   				<mx:SetProperty target="{descriptionInput}" name="y" value="389"/>
+   				<mx:SetProperty target="{newTaskName}" name="y" value="501"/>
+   				<mx:SetProperty target="{label2}" name="y" value="533"/>
+   				<mx:SetProperty target="{label3}" name="y" value="559"/>
+   				<mx:SetProperty target="{dateSelector}" name="visible" value="false"/>
+   				<mx:SetProperty target="{clock}" name="visible" value="false"/>
+   				<mx:SetProperty target="{currentDuration}" name="visible" value="false"/>
+   				<mx:SetProperty target="{today}" name="visible" value="false"/>
+   				<mx:SetProperty target="{label0}" name="visible" value="false"/>
+   				<mx:SetProperty target="{label1}" name="visible" value="false"/>
+   				<mx:SetProperty target="{grid}" name="visible" value="false"/>
+   				<mx:SetProperty target="{descriptionInput}" name="visible" value="false"/>
+   				<mx:SetProperty target="{newTaskName}" name="visible" value="false"/>
+   				<mx:SetProperty target="{label2}" name="visible" value="false"/>
+   				<mx:SetProperty target="{label3}" name="visible" value="false"/>
+   				<mx:SetProperty target="{newTaskStart}" name="visible" value="false"/>
+   				<mx:SetProperty target="{newTaskDuration}" name="visible" value="false"/>
+   				<mx:AddChild position="lastChild">
+				</mx:AddChild>
+   				<mx:SetProperty target="{canvas1}" name="visible" value="false"/>
+   				<mx:SetProperty target="{tabnavigator1}" name="visible" value="false"/>
+   				<mx:SetProperty target="{pauseBtn}" name="visible" value="false"/>
+   				<mx:SetProperty target="{savePerfBtn0}" name="visible" value="false"/>
+   				<mx:AddChild position="lastChild">
+   						<mx:TextInput x="665" y="679" displayAsPassword="true" id="passwordInput"/>
+   				</mx:AddChild>
+   				<mx:AddChild position="lastChild">
+   						<mx:TextInput x="497" y="679" id="usernameInput"/>
+   				</mx:AddChild>
+   				<mx:AddChild position="lastChild">
+   						<mx:Button x="833" y="679" label="Reset Credentials" id="resetCredentialsBtn" click="resetCredentialsClicked(event);"/>
+   				</mx:AddChild>
+   				<mx:AddChild position="lastChild">
+   						<mx:TextInput x="497" y="740" id="T1" height="22"/>
+   				</mx:AddChild>
+   				<mx:AddChild position="lastChild">
+   						<mx:TextInput x="665" y="721" id="T2"/>
+   				</mx:AddChild>
+   				<mx:AddChild position="lastChild">
+   						<mx:Button x="1424" y="740" label="Recorder" click="currentState=''"/>
+   				</mx:AddChild>
+   				<mx:AddChild relativeTo="{endNowStartBtn}" position="before">
+   						<mx:Button x="1330" y="740" label="View week" id="viewWeekBtn0" click="loadWeekGrid();currentState='ViewWeek';"/>
+   				</mx:AddChild>
+   		</mx:State>
+      <mx:State name="ViewWeek">
+         <mx:SetProperty target="{durationChange}" name="visible" value="false"/>
+         <mx:SetProperty target="{resetTaskBtn}" name="visible" value="false"/>
+         <mx:SetProperty target="{refreshBtn}" name="visible" value="false"/>
+         <mx:SetProperty target="{descriptionInput}" name="y" value="388"/>
+         <mx:SetProperty target="{descriptionInput}" name="y" value="388"/>
+         <mx:SetProperty target="{pasteBtn}" name="visible" value="false"/>
+         <mx:SetProperty target="{descriptionInput}" name="visible" value="false"/>
+         <mx:SetProperty target="{copyBtn}" name="visible" value="false"/>
+         <mx:SetProperty target="{grid}" name="visible" value="false"/>
+         <mx:SetProperty target="{newTaskBtn}" name="visible" value="false"/>
+         <mx:SetProperty target="{savePerfBtn}" name="visible" value="false"/>
+         <mx:SetProperty target="{label1}" name="visible" value="false"/>
+         <mx:SetProperty target="{today}" name="visible" value="false"/>
+         <mx:AddChild position="lastChild">
+            <mx:Button x="1338" y="740" label="Recorder" click="currentState=''"/>
+         </mx:AddChild>
+         <mx:AddChild position="lastChild">
+            <mx:DataGrid x="10" y="127" width="774" dataProvider="{weekGrid}" height="266">
+               <mx:columns>
+                  <mx:DataGridColumn headerText="Task" dataField="name" width="100">
+		               <mx:itemRenderer>
+		                	<mx:Component>
+			                	<mx:Text width="100%" text="{data.@name}" />
+			                </mx:Component>
+		               </mx:itemRenderer>				                  	
+                  </mx:DataGridColumn>
+                 <mx:DataGridColumn headerText="" dataField="description" width="100">
+		               <mx:itemRenderer>
+		                	<mx:Component>
+			                	<mx:Text width="100%" text="{XML(data).@description}" />
+			                </mx:Component>
+		               </mx:itemRenderer>				                  	
+                  </mx:DataGridColumn>
+                  <mx:DataGridColumn headerText="Monday" dataField="Monday" width="75">
+		               <mx:itemRenderer>
+		                	<mx:Component>
+			                	<mx:Text width="100%" text="{outerDocument.durationFormatter.format(data.@Monday)}" />
+			                </mx:Component>
+		               </mx:itemRenderer>				                  	
+                  </mx:DataGridColumn>
+                  <mx:DataGridColumn headerText="Tuesday" dataField="Tuesday" width="75">
+		               <mx:itemRenderer>
+		                	<mx:Component>
+			                	<mx:Text width="100%" text="{outerDocument.durationFormatter.format(data.@Tuesday)}" />
+			                </mx:Component>
+		               </mx:itemRenderer>				                  	
+                  </mx:DataGridColumn>
+                  <mx:DataGridColumn headerText="Wednesday" dataField="Wednesday" width="75">
+		               <mx:itemRenderer>
+		                	<mx:Component>
+			                	<mx:Text width="100%" text="{outerDocument.durationFormatter.format(data.@Wednesday)}" />
+			                </mx:Component>
+		               </mx:itemRenderer>				                  	
+                  </mx:DataGridColumn>
+                  <mx:DataGridColumn headerText="Thursday" dataField="Thursday" width="75">
+		               <mx:itemRenderer>
+		                	<mx:Component>
+			                	<mx:Text width="100%" text="{outerDocument.durationFormatter.format(data.@Thursday)}" />
+			                </mx:Component>
+		               </mx:itemRenderer>				                  	
+                  </mx:DataGridColumn>
+                  <mx:DataGridColumn headerText="Friday" dataField="Friday" width="75">
+		               <mx:itemRenderer>
+		                	<mx:Component>
+			                	<mx:Text width="100%" text="{outerDocument.durationFormatter.format(data.@Friday)}" />
+			                </mx:Component>
+		               </mx:itemRenderer>				                  	
+                  </mx:DataGridColumn>
+               </mx:columns>
+            </mx:DataGrid>
+         </mx:AddChild>
+         <mx:AddChild position="lastChild">
+            <mx:Button x="299" y="97" label="Send" id="mondayBtn" click="sendDayPerfs('Monday');" visible="false"/>
+         </mx:AddChild>
+         <mx:AddChild position="lastChild">
+            <mx:Button x="396" y="97" label="Send" id="tuesdayBtn" click="uploadTuesday()" visible="false"/>
+         </mx:AddChild>
+         <mx:AddChild position="lastChild">
+            <mx:Button x="498" y="97" label="Send" id="wednesdayBtn" visible="false"/>
+         </mx:AddChild>
+         <mx:AddChild position="lastChild">
+            <mx:Button x="598.5" y="97" label="Send" id="thursdayBtn" click="sendDayPerfs('Thursday');" visible="false"/>
+         </mx:AddChild>
+         <mx:AddChild position="lastChild">
+            <mx:Button x="700" y="97" label="Send" id="fridayBtn" visible="false"/>
+         </mx:AddChild>
+         <mx:AddChild position="lastChild">
+            <mx:DataGrid x="276.5" y="42" height="46" width="605" dataProvider="{weekByDayGrid}">
+               <mx:columns>
+                  <mx:DataGridColumn headerText="Monday" dataField="Monday" width="75">
+		               <mx:itemRenderer>
+		                	<mx:Component>
+			                	<mx:Text width="100%" text="{outerDocument.durationFormatter.format(data.@Monday)}" />
+			                </mx:Component>
+		               </mx:itemRenderer>				                  	
+                   </mx:DataGridColumn>
+                  <mx:DataGridColumn headerText="Tuesday" dataField="Tuesday" width="75">
+		               <mx:itemRenderer>
+		                	<mx:Component>
+			                	<mx:Text width="100%" text="{outerDocument.durationFormatter.format(data.@Tuesday)}" />
+			                </mx:Component>
+		               </mx:itemRenderer>				                  	                  	
+                  </mx:DataGridColumn>
+                 <mx:DataGridColumn headerText="Wednesday" dataField="Wednesday" width="75">
+		               <mx:itemRenderer>
+		                	<mx:Component>
+			                	<mx:Text width="100%" text="{outerDocument.durationFormatter.format(data.@Wednesday)}" />
+			                </mx:Component>
+		               </mx:itemRenderer>				                  	                  	
+                  </mx:DataGridColumn>
+                 <mx:DataGridColumn headerText="Thursday" dataField="Thursday" width="75">
+		               <mx:itemRenderer>
+		                	<mx:Component>
+			                	<mx:Text width="100%" text="{outerDocument.durationFormatter.format(data.@Thursday)}" />
+			                </mx:Component>
+		               </mx:itemRenderer>				                  	                  	
+                  </mx:DataGridColumn>
+                 <mx:DataGridColumn headerText="Friday" dataField="Friday" width="75">
+		               <mx:itemRenderer>
+		                	<mx:Component>
+			                	<mx:Text width="100%" text="{outerDocument.durationFormatter.format(data.@Friday)}" />
+			                </mx:Component>
+		               </mx:itemRenderer>				                  	                  	
+                  </mx:DataGridColumn>
+                 <mx:DataGridColumn headerText="Week" width="75">
+		               <mx:itemRenderer>
+		                	<mx:Component>
+			                	<mx:Text width="100%" text="{outerDocument.durationFormatter.format(outerDocument.weekTotal(data))}" />
+			                </mx:Component>
+		               </mx:itemRenderer>				                  	                  	
+                  </mx:DataGridColumn>
+               </mx:columns>
+            </mx:DataGrid>
+         </mx:AddChild>
+         <mx:SetProperty target="{inflowTreeView}" name="visible" value="false"/>
+         <mx:SetProperty target="{previouDayBtn}" name="visible" value="false"/>
+         <mx:SetProperty target="{nextDayBtn}" name="visible" value="false"/>
+         <mx:SetProperty target="{todayBtn}" name="visible" value="false"/>
+         <mx:SetProperty target="{newTaskName}" name="visible" value="false"/>
+         <mx:SetProperty target="{label2}" name="visible" value="false"/>
+         <mx:SetProperty target="{label3}" name="visible" value="false"/>
+         <mx:SetProperty target="{newTaskStart}" name="visible" value="false"/>
+         <mx:SetProperty target="{newTaskDuration}" name="visible" value="false"/>
+         <mx:SetProperty target="{startTimerBtn}" name="visible" value="false"/>
+         <mx:SetProperty target="{endNowStartBtn}" name="visible" value="false"/>
+         <!--mx:SetProperty target="{bar}" name="visible" value="false"/-->
+         <mx:SetProperty target="{pauseBtn}" name="visible" value="false"/>
+         <mx:SetProperty target="{label0}" name="visible" value="false"/>
+         <mx:SetProperty target="{currentDuration}" name="visible" value="false"/>
+         <mx:SetProperty target="{inflowTypesView}" name="visible" value="false"/>
+         <mx:SetProperty target="{savePerfBtn0}" name="visible" value="false"/>
+         <mx:SetProperty target="{textarea1}" name="visible" value="false"/>
+         <mx:SetProperty target="{tabnavigator1}" name="visible" value="false"/>
+      </mx:State>
+   </mx:states>	
+   <mx:Button x="389" y="612" label="End now" width="82" id="endNowStartBtn" visible="false"/>
+   <mx:Label x="224" y="618" text="Started at" width="64" id="label2" visible="false"/>
+   <mx:Label x="224" y="644" text="Duration" width="64" id="label3" visible="false"/>
+   <!--mx:Button x="389" y="642" label="End now" width="82" id="endNowDurationBtn" click="endNowDurationClick(event)" visible="false"/-->
+   <mx:TextInput x="296" y="616" width="85" id="newTaskStart" visible="false"/>
+   <mx:TextInput x="296" y="642" width="85" id="newTaskDuration" visible="false"/>
+   <!--mx:HDividedBox id="bar" x="280" y="583" height="45" width="720" dividerRelease="columnResized(event)">
+   </mx:HDividedBox-->
+   <mx:TextArea text="remaining time" width="720" x="525" y="623" id="textarea1" visible="false"/>
+   <mx:Button x="134" y="640" label="New task" click="nextTaskButtonClick(event);" id="newTaskBtn" height="25" width="82" visible="false"/>
+ 
+</mx:WindowedApplication>

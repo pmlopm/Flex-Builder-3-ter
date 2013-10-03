@@ -2,10 +2,34 @@
 <section name="Workbench">
 	<section name="com.adobe.flexbuilder.editorcore.ui.pi.PropertiesView">
 		<item value="true" key="Size and Position"/>
+		<item value="Common" key="TreeGridImpl.TopCategory"/>
 		<item value="true" key="Layout"/>
+		<item value="230" key="TreeGridImpl.ColumnZeroWidth"/>
+		<item value="" key="TreeGridImpl.TopAttribute"/>
 		<item value="true" key="Style"/>
 		<item value="true" key="Common"/>
-		<item value="1" key="ViewOption"/>
+		<item value="2" key="ViewOption"/>
+		<item value="251" key="TreeGridImpl.ColumnOneWidth"/>
+		<list key="CategoryExpanded">
+			<item value="true"/>
+			<item value="false"/>
+			<item value="true"/>
+			<item value="true"/>
+			<item value="false"/>
+			<item value="false"/>
+			<item value="true"/>
+			<item value="false"/>
+		</list>
+		<list key="CategoryNames">
+			<item value="Common"/>
+			<item value="Effects"/>
+			<item value="Events"/>
+			<item value="Layout Constraints"/>
+			<item value="Size"/>
+			<item value="Styles"/>
+			<item value="Other"/>
+			<item value="Data"/>
+		</list>
 	</section>
 	<section name="ExportWizard">
 	</section>
